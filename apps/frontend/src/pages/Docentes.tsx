@@ -1,0 +1,271 @@
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
+import { api } from "../lib/api";
+import { useCatalogQuery } from "../lib/queries";
+import { SelectField, TextField } from "../components/fields";
+import Modal from "../components/Modal";
+import ConfirmDialog from "../components/ConfirmDialog";
+import type { Profesor } from "../lib/types";
+
+type FormState = { nombre: string; email: string; maxHorasSemana: string };
+
+const EMPTY: FormState = { nombre: "", email: "", maxHorasSemana: "" };
+
+export default function Docentes() {
+  const qc = useQueryClient();
+  const [fq, setFq] = useState("");
+  const [tieneCargas, setTieneCargas] = useState("");
+
+  const { data: profesores = [], isLoading } = useCatalogQuery<Profesor[]>("profesores", "/profesores", {
+    q: fq,
+    tieneCargas,
+  });
+
+  const [editing, setEditing] = useState<Profesor | null>(null);
+  const [form, setForm] = useState<FormState>(EMPTY);
+  const [formOpen, setFormOpen] = useState(false);
+  const [toDelete, setToDelete] = useState<Profesor | null>(null);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["profesores"] });
+
+  const create = useMutation({
+    mutationFn: (data: { nombre: string; email?: string; maxHorasSemana?: number }) =>
+      api.post("/profesores", data),
+    onSuccess: () => {
+      invalidate();
+      setFormOpen(false);
+      setEditing(null);
+      setForm(EMPTY);
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<Profesor> }) => api.patch(`/profesores/${id}`, data),
+    onSuccess: () => {
+      invalidate();
+      setFormOpen(false);
+      setEditing(null);
+      setForm(EMPTY);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.delete(`/profesores/${id}`),
+    onSuccess: () => {
+      invalidate();
+      setToDelete(null);
+      remove.reset();
+    },
+  });
+
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY);
+    setFormOpen(true);
+  }
+
+  function openEdit(p: Profesor) {
+    setEditing(p);
+    setForm({ nombre: p.nombre, email: p.email ?? "", maxHorasSemana: p.maxHorasSemana ? String(p.maxHorasSemana) : "" });
+    setFormOpen(true);
+  }
+
+  function openDelete(p: Profesor) {
+    remove.reset();
+    setToDelete(p);
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const data = {
+      nombre: form.nombre.trim(),
+      email: form.email.trim() || undefined,
+      maxHorasSemana: form.maxHorasSemana ? Number(form.maxHorasSemana) : undefined,
+    };
+    if (editing) update.mutate({ id: editing.id, data });
+    else create.mutate(data);
+  }
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold text-slate-800">Docentes</h1>
+        <p className="text-sm text-slate-500">Gestión del cuerpo docente y su carga máxima semanal.</p>
+      </header>
+
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+        <TextField
+          label="Buscar por nombre o email"
+          placeholder="María, juan@colegio..."
+          value={fq}
+          onChange={(e) => setFq(e.target.value)}
+          wrapper="min-w-64 flex-1"
+        />
+        <SelectField
+          label="Con carga asignada"
+          emptyLabel="Todas"
+          value={tieneCargas}
+          onChange={(e) => setTieneCargas(e.target.value)}
+          wrapper="w-48"
+        >
+          <option value="true">Con carga</option>
+          <option value="false">Sin carga</option>
+        </SelectField>
+        <button
+          onClick={() => {
+            setFq("");
+            setTieneCargas("");
+          }}
+          disabled={!fq && !tieneCargas}
+          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          <FilterX className="h-4 w-4" />
+          Limpiar
+        </button>
+        <button
+          onClick={openCreate}
+          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          <Plus className="h-4 w-4" />
+          Nuevo docente
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Nombre</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Email</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Máx. horas/semana</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
+              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {isLoading && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                  Cargando...
+                </td>
+              </tr>
+            )}
+            {!isLoading && profesores.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                  <Search className="mx-auto mb-2 h-5 w-5" />
+                  Sin resultados para los filtros aplicados.
+                </td>
+              </tr>
+            )}
+            {profesores.map((p) => (
+              <tr key={p.id}>
+                <td className="px-4 py-3 font-medium text-slate-800">{p.nombre}</td>
+                <td className="px-4 py-3 text-slate-600">{p.email ?? "-"}</td>
+                <td className="px-4 py-3 text-slate-600">{p.maxHorasSemana ?? "-"}</td>
+                <td className="px-4 py-3">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                    {p._count?.cargas ?? 0}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="inline-flex gap-1">
+                    <button
+                      onClick={() => openEdit(p)}
+                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => openDelete(p)}
+                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal
+        open={formOpen}
+        title={editing ? "Editar docente" : "Nuevo docente"}
+        onClose={() => {
+          setFormOpen(false);
+          setEditing(null);
+          setForm(EMPTY);
+        }}
+      >
+        <form onSubmit={submit} className="space-y-4">
+          <TextField
+            label="Nombre *"
+            required
+            value={form.nombre}
+            onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+            placeholder="Prof. Nombre"
+            wrapper=""
+          />
+          <TextField
+            label="Email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="docente@colegio.local"
+            wrapper=""
+          />
+          <TextField
+            label="Máx. horas/semana"
+            type="number"
+            min={1}
+            value={form.maxHorasSemana}
+            onChange={(e) => setForm({ ...form, maxHorasSemana: e.target.value })}
+            placeholder="30"
+            wrapper=""
+          />
+          {(create.error || update.error) && (
+            <p className="text-sm text-red-600">
+              {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setFormOpen(false);
+                setEditing(null);
+                setForm(EMPTY);
+              }}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={!form.nombre.trim() || create.isPending || update.isPending}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={toDelete !== null}
+        title="Eliminar docente"
+        message={`¿Eliminar a "${toDelete?.nombre}"? Esta acción no se puede deshacer.`}
+        loading={remove.isPending}
+        error={remove.isError ? remove.error.message : null}
+        onCancel={() => {
+          setToDelete(null);
+          remove.reset();
+        }}
+        onConfirm={() => toDelete && remove.mutate(toDelete.id)}
+      />
+    </div>
+  );
+}

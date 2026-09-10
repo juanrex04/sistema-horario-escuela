@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String
+  nombre       String
+  rol          String    @default("directivo")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Seccion {
+  id     Int    @id @default(autoincrement())
+  nombre String @unique
+  bloques BloqueHorario[]
+  cursos  Curso[]
+}
+
+model DiaSemana {
+  id                  Int    @id @default(autoincrement())
+  numeroDia           Int    @unique
+  esHorarioEspecial   Boolean @default(false)
+  bloques             BloqueHorario[]
+}
+
+model BloqueHorario {
+  id           Int     @id @default(autoincrement())
+  seccion      Seccion @relation(fields: [seccionId], references: [id], onDelete: Cascade)
+  seccionId    Int
+  diaSemana    DiaSemana @relation(fields: [diaSemanaId], references: [id], onDelete: Cascade)
+  diaSemanaId  Int
+  numeroPeriodo String
+  horaInicio   String
+  horaFin      String
+  esAcademico  Boolean @default(true)
+  asignaciones HorarioAsignado[]
+
+  @@unique([seccionId, diaSemanaId, numeroPeriodo])
+}
+
+model Profesor {
+  id              Int      @id @default(autoincrement())
+  nombre          String
+  email           String?  @unique
+  maxHorasSemana  Int?
+  cargas          CargaAcademica[]
+}
+
+model Curso {
+  id        Int    @id @default(autoincrement())
+  seccion   Seccion @relation(fields: [seccionId], references: [id], onDelete: Cascade)
+  seccionId Int
+  nombre    String
+  cargas    CargaAcademica[]
+
+  @@unique([seccionId, nombre])
+}
+
+model Materia {
+  id     Int    @id @default(autoincrement())
+  nombre String @unique
+  cargas CargaAcademica[]
+}
+
+model CargaAcademica {
+  id                         Int     @id @default(autoincrement())
+  curso                      Curso   @relation(fields: [cursoId], references: [id], onDelete: Cascade)
+  cursoId                    Int
+  materia                    Materia @relation(fields: [materiaId], references: [id], onDelete: Cascade)
+  materiaId                  Int
+  profesor                   Profesor @relation(fields: [profesorId], references: [id], onDelete: Cascade)
+  profesorId                 Int
+  bloquesSemanalesRequeridos Int
+  asignaciones               HorarioAsignado[]
+
+  @@unique([cursoId, materiaId, profesorId])
+}
+
+model HorarioAsignado {
+  id               Int            @id @default(autoincrement())
+  cargaAcademica   CargaAcademica @relation(fields: [cargaAcademicaId], references: [id], onDelete: Cascade)
+  cargaAcademicaId Int
+  bloqueHorario    BloqueHorario  @relation(fields: [bloqueHorarioId], references: [id], onDelete: Cascade)
+  bloqueHorarioId  Int
+
+  @@unique([cargaAcademicaId, bloqueHorarioId])
+}

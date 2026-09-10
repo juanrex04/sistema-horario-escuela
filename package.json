@@ -1,0 +1,21 @@
+{
+  "name": "school-timetabling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de gestión y generación de horarios escolares (monorepo)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace apps/frontend",
+    "dev:backend": "npm run dev --workspace apps/backend-node",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "allowScripts": {
+    "prisma@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "@prisma/client@6.19.3": true,
+    "esbuild@0.25.12": true
+  }
+}

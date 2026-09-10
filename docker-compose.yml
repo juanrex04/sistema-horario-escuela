@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: st-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: horarios
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d horarios"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend-node:
+    build:
+      context: ./apps/backend-node
+    container_name: st-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/horarios
+      JWT_SECRET: change-me
+      SOLVER_URL: http://solver-python:8000
+      PORT: 4000
+    ports:
+      - "4000:4000"
+
+  solver-python:
+    build:
+      context: ./services/solver-python
+    container_name: st-solver
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    container_name: st-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend-node
+    environment:
+      VITE_BACKEND_TARGET: http://backend-node:4000
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
