@@ -1,21 +1,25 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, FilterX, X } from "lucide-react";
 import { api } from "../lib/api";
-import { useCatalogQuery } from "../lib/queries";
+import { usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Pagination from "../components/Pagination";
+import TableSkeleton from "../components/TableSkeleton";
 import type { CargaAcademica, Curso, Materia, Profesor, Seccion } from "../lib/types";
 
 type FormState = {
   cursoId: string;
+  seccionId: string;
+  cursoIds: number[];
   materiaId: string;
   profesorId: string;
   bloques: string;
 };
 
-const EMPTY: FormState = { cursoId: "", materiaId: "", profesorId: "", bloques: "" };
+const EMPTY: FormState = { cursoId: "", seccionId: "", cursoIds: [], materiaId: "", profesorId: "", bloques: "" };
 
 export default function Cargas() {
   const qc = useQueryClient();
@@ -27,8 +31,10 @@ export default function Cargas() {
   const [fMin, setFMin] = useState("");
   const [fMax, setFMax] = useState("");
   const [fq, setFq] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
-  const { data: cargas = [], isLoading } = useCatalogQuery<CargaAcademica[]>("cargas", "/cargas", {
+  const { data: pageData, isLoading } = usePaginatedQuery<CargaAcademica>("cargas", "/cargas", {
     seccionId: fSeccion,
     cursoId: fCurso,
     materiaId: fMateria,
@@ -36,7 +42,9 @@ export default function Cargas() {
     minBloques: fMin,
     maxBloques: fMax,
     q: fq,
-  });
+  }, page, pageSize);
+  const cargas = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
 
   const { data: secciones = [] } = useQuery({ queryKey: ["secciones"], queryFn: () => api.get<Seccion[]>("/secciones") });
   const { data: cursos = [] } = useQuery({ queryKey: ["cursos"], queryFn: () => api.get<Curso[]>("/cursos") });
@@ -48,17 +56,28 @@ export default function Cargas() {
   const [editing, setEditing] = useState<CargaAcademica | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [formOpen, setFormOpen] = useState(false);
+  const [bulkAviso, setBulkAviso] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<CargaAcademica | null>(null);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["cargas"] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["cargas"] });
+  };
 
-  const create = useMutation({
-    mutationFn: (data: Omit<CargaAcademica, "id">) => api.post("/cargas", data),
-    onSuccess: () => {
+  const createMasivas = useMutation({
+    mutationFn: (data: { cursoIds: number[]; materiaId: number; profesorId: number; bloquesSemanalesRequeridos: number }) =>
+      api.post<{ creadas: CargaAcademica[]; omitidas: number[] }>("/cargas/masivas", data),
+    onSuccess: (data) => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setForm(EMPTY);
+      if (data.omitidas.length > 0) {
+        setBulkAviso(
+          `Se crearon ${data.creadas.length} carga(s) y se omitieron ${data.omitidas.length} curso(s) porque ya tenían la materia/profesor seleccionada.`
+        );
+      } else {
+        setBulkAviso(null);
+      }
     },
   });
 
@@ -84,6 +103,7 @@ export default function Cargas() {
   function openCreate() {
     setEditing(null);
     setForm(EMPTY);
+    setBulkAviso(null);
     setFormOpen(true);
   }
 
@@ -91,10 +111,13 @@ export default function Cargas() {
     setEditing(c);
     setForm({
       cursoId: String(c.cursoId),
+      seccionId: "",
+      cursoIds: [],
       materiaId: String(c.materiaId),
       profesorId: String(c.profesorId),
       bloques: String(c.bloquesSemanalesRequeridos),
     });
+    setBulkAviso(null);
     setFormOpen(true);
   }
 
@@ -105,14 +128,35 @@ export default function Cargas() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = {
-      cursoId: Number(form.cursoId),
+    if (editing) {
+      update.mutate({
+        id: editing.id,
+        data: {
+          cursoId: Number(form.cursoId),
+          materiaId: Number(form.materiaId),
+          profesorId: Number(form.profesorId),
+          bloquesSemanalesRequeridos: Number(form.bloques),
+        },
+      });
+      return;
+    }
+    createMasivas.mutate({
+      cursoIds: form.cursoIds,
       materiaId: Number(form.materiaId),
       profesorId: Number(form.profesorId),
       bloquesSemanalesRequeridos: Number(form.bloques),
-    };
-    if (editing) update.mutate({ id: editing.id, data });
-    else create.mutate(data);
+    });
+  }
+
+  const cursosDeSeccion = form.seccionId
+    ? cursos.filter((c) => c.seccionId === Number(form.seccionId)).sort((a, b) => a.nombre.localeCompare(b.nombre))
+    : [];
+
+  function toggleCurso(id: number) {
+    setForm((f) => ({
+      ...f,
+      cursoIds: f.cursoIds.includes(id) ? f.cursoIds.filter((x) => x !== id) : [...f.cursoIds, id],
+    }));
   }
 
   function clearFilters() {
@@ -123,6 +167,7 @@ export default function Cargas() {
     setFMin("");
     setFMax("");
     setFq("");
+    setPage(1);
   }
 
   const filtersActive = fSeccion || fCurso || fMateria || fProfesor || fMin || fMax || fq;
@@ -144,6 +189,7 @@ export default function Cargas() {
           onChange={(e) => {
             setFSeccion(e.target.value);
             setFCurso("");
+            setPage(1);
           }}
           wrapper="w-44"
         >
@@ -157,7 +203,7 @@ export default function Cargas() {
           label="Curso"
           emptyLabel="Todos"
           value={fCurso}
-          onChange={(e) => setFCurso(e.target.value)}
+          onChange={(e) => { setFCurso(e.target.value); setPage(1); }}
           wrapper="w-44"
         >
           {cursosFiltrados.map((c) => (
@@ -166,14 +212,14 @@ export default function Cargas() {
             </option>
           ))}
         </SelectField>
-        <SelectField label="Materia" emptyLabel="Todas" value={fMateria} onChange={(e) => setFMateria(e.target.value)} wrapper="w-40">
+        <SelectField label="Materia" emptyLabel="Todas" value={fMateria} onChange={(e) => { setFMateria(e.target.value); setPage(1); }} wrapper="w-40">
           {materias.map((m) => (
             <option key={m.id} value={m.id}>
               {m.nombre}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Profesor" emptyLabel="Todos" value={fProfesor} onChange={(e) => setFProfesor(e.target.value)} wrapper="w-44">
+        <SelectField label="Profesor" emptyLabel="Todos" value={fProfesor} onChange={(e) => { setFProfesor(e.target.value); setPage(1); }} wrapper="w-44">
           {profesores.map((p) => (
             <option key={p.id} value={p.id}>
               {p.nombre}
@@ -185,7 +231,7 @@ export default function Cargas() {
           type="number"
           min={1}
           value={fMin}
-          onChange={(e) => setFMin(e.target.value)}
+          onChange={(e) => { setFMin(e.target.value); setPage(1); }}
           wrapper="w-36"
         />
         <TextField
@@ -193,13 +239,13 @@ export default function Cargas() {
           type="number"
           min={1}
           value={fMax}
-          onChange={(e) => setFMax(e.target.value)}
+          onChange={(e) => { setFMax(e.target.value); setPage(1); }}
           wrapper="w-36"
         />
         <TextField
           label="Buscar (curso, materia o profesor)"
           value={fq}
-          onChange={(e) => setFq(e.target.value)}
+          onChange={(e) => { setFq(e.target.value); setPage(1); }}
           wrapper="min-w-56 flex-1"
         />
         <button
@@ -219,6 +265,19 @@ export default function Cargas() {
         </button>
       </div>
 
+      {bulkAviso && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span>{bulkAviso}</span>
+          <button
+            onClick={() => setBulkAviso(null)}
+            className="ml-auto rounded px-1.5 text-amber-500 hover:text-amber-700"
+            aria-label="Cerrar aviso"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50">
@@ -231,13 +290,7 @@ export default function Cargas() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                  Cargando...
-                </td>
-              </tr>
-            )}
+            {isLoading && <TableSkeleton cols={5} />}
             {!isLoading && cargas.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
@@ -274,6 +327,16 @@ export default function Cargas() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPage={setPage}
+          onPageSize={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+        />
       </div>
 
       <Modal
@@ -286,18 +349,87 @@ export default function Cargas() {
         }}
       >
         <form onSubmit={submit} className="space-y-4">
-          <SelectField
-            label="Curso *"
-            required
-            value={form.cursoId}
-            onChange={(e) => setForm({ ...form, cursoId: e.target.value })}
-          >
-            {cursos.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.seccion?.nombre} - {c.nombre}
-              </option>
-            ))}
-          </SelectField>
+          {editing ? (
+            <SelectField
+              label="Curso *"
+              required
+              value={form.cursoId}
+              onChange={(e) => setForm({ ...form, cursoId: e.target.value })}
+            >
+              {cursos.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.seccion?.nombre} - {c.nombre}
+                </option>
+              ))}
+            </SelectField>
+          ) : (
+            <>
+              <SelectField
+                label="Sección *"
+                required
+                value={form.seccionId}
+                onChange={(e) => setForm({ ...form, seccionId: e.target.value, cursoIds: [] })}
+              >
+                {secciones.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nombre}
+                  </option>
+                ))}
+              </SelectField>
+              {form.seccionId && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Cursos * ({form.cursoIds.length} seleccionado{form.cursoIds.length === 1 ? "" : "s"})
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, cursoIds: cursosDeSeccion.map((c) => c.id) })}
+                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, cursoIds: [] })}
+                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Ninguno
+                      </button>
+                    </div>
+                  </div>
+                  {cursosDeSeccion.length === 0 ? (
+                    <p className="text-sm text-slate-400">La sección no tiene cursos.</p>
+                  ) : (
+                    <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                      {cursosDeSeccion.map((c) => {
+                        const checked = form.cursoIds.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
+                              checked
+                                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCurso(c.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            {c.seccion?.nombre} - {c.nombre}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
           <SelectField
             label="Materia *"
             required
@@ -330,9 +462,11 @@ export default function Cargas() {
             value={form.bloques}
             onChange={(e) => setForm({ ...form, bloques: e.target.value })}
           />
-          {(create.error || update.error) && (
+          {(createMasivas.error || update.error) && (
             <p className="text-sm text-red-600">
-              {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
+              {(createMasivas.error ?? update.error) instanceof Error
+                ? (createMasivas.error ?? update.error)?.message
+                : "Error"}
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
@@ -349,10 +483,18 @@ export default function Cargas() {
             </button>
             <button
               type="submit"
-              disabled={!form.cursoId || !form.materiaId || !form.profesorId || !form.bloques || create.isPending || update.isPending}
+              disabled={
+                (!editing && (!form.seccionId || form.cursoIds.length === 0)) ||
+                (editing && !form.cursoId) ||
+                !form.materiaId ||
+                !form.profesorId ||
+                !form.bloques ||
+                createMasivas.isPending ||
+                update.isPending
+              }
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
+              {createMasivas.isPending || update.isPending ? "Guardando..." : "Guardar"}
             </button>
           </div>
         </form>

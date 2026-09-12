@@ -13,18 +13,29 @@ function toMinutes(time: string): number {
 }
 
 async function buildPayload() {
-  const [secciones, dias, bloques, profesores, cursos, materias, cargas] = await Promise.all([
-    prisma.seccion.findMany({ orderBy: { id: "asc" } }),
-    prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
-    prisma.bloqueHorario.findMany({ orderBy: { id: "asc" } }),
-    prisma.profesor.findMany({ orderBy: { id: "asc" } }),
-    prisma.curso.findMany({ orderBy: { id: "asc" } }),
-    prisma.materia.findMany({ orderBy: { id: "asc" } }),
-    prisma.cargaAcademica.findMany({
-      include: { curso: true, materia: true, profesor: true },
-      orderBy: { id: "asc" },
-    }),
-  ]);
+  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos] =
+    await Promise.all([
+      prisma.seccion.findMany({ orderBy: { id: "asc" } }),
+      prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
+      prisma.bloqueHorario.findMany({ orderBy: { id: "asc" } }),
+      prisma.profesor.findMany({ orderBy: { id: "asc" } }),
+      prisma.curso.findMany({ orderBy: { id: "asc" } }),
+      prisma.materia.findMany({ orderBy: { id: "asc" } }),
+      prisma.cargaAcademica.findMany({
+        include: { curso: true, materia: true, profesor: true },
+        orderBy: { id: "asc" },
+      }),
+      prisma.reunionSeccion.findMany({ include: { secciones: true } }),
+      prisma.deporteSeccion.findMany(),
+      prisma.departamento.findMany({
+        where: { reunionActiva: true },
+        include: { materias: true },
+      }),
+    ]);
+
+  const colaborativas = departamentos
+    .filter((d) => d.materias.length > 0)
+    .map((d) => ({ departamentoId: d.id, materiaIds: d.materias.map((m) => m.id) }));
 
   return {
     secciones: secciones.map(({ id, nombre }) => ({ id, nombre })),
@@ -38,7 +49,7 @@ async function buildPayload() {
       finMin: toMinutes(b.horaFin),
       esAcademico: b.esAcademico,
     })),
-    profesores: profesores.map(({ id, nombre, maxHorasSemana }) => ({ id, nombre, maxHorasSemana })),
+    profesores: profesores.map(({ id, nombre, maxHorasSemana, seccionBaseId }) => ({ id, nombre, maxHorasSemana, seccionBaseId })),
     cursos: cursos.map(({ id, nombre, seccionId }) => ({ id, nombre, seccionId })),
     materias: materias.map(({ id, nombre }) => ({ id, nombre })),
     cargas: cargas.map(({ id, cursoId, materiaId, profesorId, bloquesSemanalesRequeridos }) => ({
@@ -48,6 +59,18 @@ async function buildPayload() {
       profesorId,
       bloquesSemanalesRequeridos,
     })),
+    reunionesSeccion: reuniones.map((r) => ({
+      diaSemanaId: r.diaSemanaId,
+      horaInicio: toMinutes(r.horaInicio),
+      horaFin: toMinutes(r.horaFin),
+      seccionIds: r.secciones.map((s) => s.id),
+    })),
+    deportes: deportes.map((d) => ({
+      seccionId: d.seccionId,
+      diaSemanaId: d.diaSemanaId,
+      numeroPeriodo: d.numeroPeriodo,
+    })),
+    colaborativas,
   };
 }
 
@@ -82,6 +105,7 @@ router.post("/generate", async (req, res) => {
   const result = (await solverResponse.json()) as {
     status: string;
     asignaciones: { cargaAcademicaId: number; bloqueHorarioId: number }[];
+    colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
   };
 
   if (result.status === "INFEASIBLE") {
@@ -89,15 +113,36 @@ router.post("/generate", async (req, res) => {
     return;
   }
 
-  for (const asignacion of result.asignaciones) {
-    await prisma.horarioAsignado.create({ data: asignacion });
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.horarioAsignado.deleteMany();
+    for (const asignacion of result.asignaciones) {
+      await tx.horarioAsignado.create({ data: asignacion });
+    }
+
+    await tx.colaborativaGenerada.deleteMany();
+    for (const col of result.colaborativas ?? []) {
+      await tx.colaborativaGenerada.create({
+        data: {
+          departamentoId: col.departamentoId,
+          diaSemanaId: col.diaSemanaId,
+          horaInicio: minutesToHhmm(col.horaInicio),
+          horaFin: minutesToHhmm(col.horaFin),
+        },
+      });
+    }
+  });
 
   res.json({ ...result });
 });
 
+function minutesToHhmm(min: number): string {
+  const h = Math.floor(min / 60).toString().padStart(2, "0");
+  const m = (min % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 router.delete("/resultado", async (_req, res) => {
-  await prisma.horarioAsignado.deleteMany();
+  await prisma.$transaction([prisma.horarioAsignado.deleteMany(), prisma.colaborativaGenerada.deleteMany()]);
   res.status(204).end();
 });
 
@@ -110,6 +155,14 @@ router.get("/resultado", async (_req, res) => {
       },
     },
     orderBy: [{ bloqueHorario: { diaSemanaId: "asc" } }, { bloqueHorario: { horaInicio: "asc" } }],
+  });
+  res.json(items);
+});
+
+router.get("/resultado/colaborativas", async (_req, res) => {
+  const items = await prisma.colaborativaGenerada.findMany({
+    include: { departamento: { select: { id: true, nombre: true } }, diaSemana: true },
+    orderBy: [{ diaSemanaId: "asc" }, { horaInicio: "asc" }],
   });
   res.json(items);
 });

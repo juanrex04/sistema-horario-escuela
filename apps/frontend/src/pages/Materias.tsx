@@ -1,43 +1,57 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
-import { useCatalogQuery } from "../lib/queries";
-import { TextField } from "../components/fields";
+import { usePaginatedQuery } from "../lib/queries";
+import { TextField, SelectField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import type { Materia } from "../lib/types";
+import Pagination from "../components/Pagination";
+import TableSkeleton from "../components/TableSkeleton";
+import type { Departamento, Materia } from "../lib/types";
 
 export default function Materias() {
   const qc = useQueryClient();
   const [fq, setFq] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
-  const { data: materias = [], isLoading } = useCatalogQuery<Materia[]>("materias-list", "/materias", { q: fq });
+  const { data: pageData, isLoading } = usePaginatedQuery<Materia>("materias-list", "/materias", { q: fq }, page, pageSize);
+  const materias = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
+  const { data: departamentos = [] } = useQuery({
+    queryKey: ["departamentos"],
+    queryFn: () => api.get<Departamento[]>("/departamentos"),
+  });
 
   const [editing, setEditing] = useState<Materia | null>(null);
   const [nombre, setNombre] = useState("");
+  const [departamentoId, setDepartamentoId] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Materia | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["materias-list"] });
 
   const create = useMutation({
-    mutationFn: (data: { nombre: string }) => api.post("/materias", data),
+    mutationFn: (data: { nombre: string; departamentoId: number | null }) => api.post("/materias", data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setNombre("");
+      setDepartamentoId("");
     },
   });
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { nombre: string } }) => api.patch(`/materias/${id}`, data),
+    mutationFn: ({ id, data }: { id: number; data: { nombre: string; departamentoId: number | null } }) =>
+      api.patch(`/materias/${id}`, data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setNombre("");
+      setDepartamentoId("");
     },
   });
 
@@ -53,12 +67,14 @@ export default function Materias() {
   function openCreate() {
     setEditing(null);
     setNombre("");
+    setDepartamentoId("");
     setFormOpen(true);
   }
 
   function openEdit(m: Materia) {
     setEditing(m);
     setNombre(m.nombre);
+    setDepartamentoId(m.departamentoId ? String(m.departamentoId) : "");
     setFormOpen(true);
   }
 
@@ -69,8 +85,12 @@ export default function Materias() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (editing) update.mutate({ id: editing.id, data: { nombre: nombre.trim() } });
-    else create.mutate({ nombre: nombre.trim() });
+    const data = {
+      nombre: nombre.trim(),
+      departamentoId: departamentoId ? Number(departamentoId) : null,
+    };
+    if (editing) update.mutate({ id: editing.id, data });
+    else create.mutate(data);
   }
 
   return (
@@ -84,12 +104,12 @@ export default function Materias() {
         <TextField
           label="Buscar por nombre"
           value={fq}
-          onChange={(e) => setFq(e.target.value)}
+          onChange={(e) => { setFq(e.target.value); setPage(1); }}
           placeholder="Matemática, Lengua..."
           wrapper="min-w-56 flex-1"
         />
         <button
-          onClick={() => setFq("")}
+          onClick={() => { setFq(""); setPage(1); }}
           disabled={!fq}
           className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
         >
@@ -110,21 +130,16 @@ export default function Materias() {
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Materia</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Departamento</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
               <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && (
-              <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
-                  Cargando...
-                </td>
-              </tr>
-            )}
+            {isLoading && <TableSkeleton cols={4} />}
             {!isLoading && materias.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
                   <Search className="mx-auto mb-2 h-5 w-5" />
                   Sin resultados para los filtros aplicados.
                 </td>
@@ -133,6 +148,15 @@ export default function Materias() {
             {materias.map((m) => (
               <tr key={m.id}>
                 <td className="px-4 py-3 font-medium text-slate-800">{m.nombre}</td>
+                <td className="px-4 py-3">
+                  {m.departamento ? (
+                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                      {m.departamento.nombre}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">Sin departamento</span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
                     {m._count?.cargas ?? 0}
@@ -158,6 +182,16 @@ export default function Materias() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPage={setPage}
+          onPageSize={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+        />
       </div>
 
       <Modal
@@ -177,6 +211,18 @@ export default function Materias() {
             onChange={(e) => setNombre(e.target.value)}
             placeholder="Matemática"
           />
+          <SelectField
+            label="Departamento"
+            value={departamentoId}
+            onChange={(e) => setDepartamentoId(e.target.value)}
+            emptyLabel="Sin departamento"
+          >
+            {departamentos.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.nombre}
+              </option>
+            ))}
+          </SelectField>
           {(create.error || update.error) && (
             <p className="text-sm text-red-600">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}

@@ -29,6 +29,7 @@ class Bloque(BaseModel):
 class Profesor(BaseModel):
     id: int
     nombre: str
+    seccion_base_id: int = Field(alias="seccionBaseId")
     max_horas_semana: int | None = Field(default=None, alias="maxHorasSemana")
 
     model_config = {"populate_by_name": True}
@@ -57,6 +58,24 @@ class Carga(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ReunionSeccion(BaseModel):
+    dia_semana_id: int = Field(alias="diaSemanaId")
+    hora_inicio: int = Field(alias="horaInicio")
+    hora_fin: int = Field(alias="horaFin")
+    seccion_ids: list[int] = Field(alias="seccionIds")
+
+
+class Deporte(BaseModel):
+    seccion_id: int = Field(alias="seccionId")
+    dia_semana_id: int = Field(alias="diaSemanaId")
+    numero_periodo: str = Field(alias="numeroPeriodo")
+
+
+class ColaborativaEntrada(BaseModel):
+    departamento_id: int = Field(alias="departamentoId")
+    materia_ids: list[int] = Field(alias="materiaIds")
+
+
 class SolveRequest(BaseModel):
     secciones: list[Seccion] = []
     dias: list[Dia] = []
@@ -65,6 +84,9 @@ class SolveRequest(BaseModel):
     cursos: list[Curso] = []
     materias: list[Materia] = []
     cargas: list[Carga] = []
+    reuniones_seccion: list[ReunionSeccion] = Field(default_factory=list, alias="reunionesSeccion")
+    deportes: list[Deporte] = Field(default_factory=list)
+    colaborativas: list[ColaborativaEntrada] = Field(default_factory=list)
 
 
 class Asignacion(BaseModel):
@@ -74,9 +96,19 @@ class Asignacion(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ReunionCalculada(BaseModel):
+    departamento_id: int = Field(alias="departamentoId")
+    dia_semana_id: int = Field(alias="diaSemanaId")
+    hora_inicio: int = Field(alias="horaInicio")
+    hora_fin: int = Field(alias="horaFin")
+
+    model_config = {"populate_by_name": True}
+
+
 class SolveResponse(BaseModel):
     status: str
     num_asignaciones: int = Field(alias="numAsignaciones")
     asignaciones: list[Asignacion]
+    colaborativas: list[ReunionCalculada] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}

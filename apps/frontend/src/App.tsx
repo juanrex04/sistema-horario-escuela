@@ -5,9 +5,12 @@ import Layout from "./components/Layout";
 import Horario from "./pages/Horario";
 import Docentes from "./pages/Docentes";
 import Cursos from "./pages/Cursos";
+import Secciones from "./pages/Secciones";
 import Materias from "./pages/Materias";
 import Cargas from "./pages/Cargas";
 import Bloques from "./pages/Bloques";
+import Departamentos from "./pages/Departamentos";
+import Reglas from "./pages/Reglas";
 
 function Shell() {
   const { user } = useAuth();
@@ -19,7 +22,10 @@ function Shell() {
         <Route path="/horario" element={<Horario />} />
         <Route path="/docentes" element={<Docentes />} />
         <Route path="/cursos" element={<Cursos />} />
+        <Route path="/secciones" element={<Secciones />} />
         <Route path="/materias" element={<Materias />} />
+        <Route path="/departamentos" element={<Departamentos />} />
+        <Route path="/reglas" element={<Reglas />} />
         <Route path="/cargas" element={<Cargas />} />
         <Route path="/bloques" element={<Bloques />} />
         <Route path="*" element={<Navigate to="/horario" replace />} />

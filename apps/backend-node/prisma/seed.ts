@@ -93,10 +93,14 @@ type SeccionNombre = keyof typeof HORARIOS;
 async function main() {
   console.log("Limpiando base de datos...");
   await prisma.horarioAsignado.deleteMany();
+  await prisma.colaborativaGenerada.deleteMany();
+  await prisma.deporteSeccion.deleteMany();
+  await prisma.reunionSeccion.deleteMany();
   await prisma.cargaAcademica.deleteMany();
   await prisma.bloqueHorario.deleteMany();
   await prisma.curso.deleteMany();
   await prisma.materia.deleteMany();
+  await prisma.departamento.deleteMany();
   await prisma.profesor.deleteMany();
   await prisma.seccion.deleteMany();
   await prisma.diaSemana.deleteMany();
@@ -131,7 +135,7 @@ async function main() {
         await prisma.bloqueHorario.create({
           data: {
             seccionId: sec.id,
-            diaSemanaId: d,
+            diaSemanaId: dias[d].id,
             numeroPeriodo: b.periodo,
             horaInicio: b.inicio,
             horaFin: b.fin,
@@ -154,18 +158,37 @@ async function main() {
     materias[nombre] = m.id;
   }
 
+  console.log("Creando departamentos...");
+  const departamentos: Record<string, number> = {};
+  const materiasPorDepartamento: Record<string, string[]> = {
+    "Ciencia": ["Ciencias Naturales", "Física", "Biología", "Química"],
+    "Matemáticas": ["Matemáticas"],
+    "Lenguaje": ["Lenguaje"],
+    "Idiomas": ["Inglés"],
+    "Humanidades": ["Historia", "Filosofía"],
+    "Artes": ["Artes", "Música"],
+    "Tecnología": ["Programación"],
+    "Ed. Física": ["Educación Física"],
+  };
+  for (const [nombre, lista] of Object.entries(materiasPorDepartamento)) {
+    const d = await prisma.departamento.create({
+      data: { nombre, materias: { connect: lista.map((m) => ({ id: materias[m] })) } },
+    });
+    departamentos[nombre] = d.id;
+  }
+
   console.log("Creando profesores...");
   const profesores: Record<string, number> = {};
   const listaProfesores = [
-    { nombre: "María López", email: "maria.lopez@colegio.local", maxHorasSemana: 30 },
-    { nombre: "Juan Pérez", email: "juan.perez@colegio.local", maxHorasSemana: 30 },
-    { nombre: "Ana Rodríguez", email: "ana.rodriguez@colegio.local", maxHorasSemana: 28 },
-    { nombre: "Carlos Gómez", email: "carlos.gomez@colegio.local", maxHorasSemana: 30 },
-    { nombre: "Lucía Fernández", email: "lucia.fernandez@colegio.local", maxHorasSemana: 25 },
-    { nombre: "Pedro Sánchez", email: "pedro.sanchez@colegio.local", maxHorasSemana: 26 },
-    { nombre: "Elena Ruiz", email: "elena.ruiz@colegio.local", maxHorasSemana: 25 },
-    { nombre: "Jorge Morales", email: "jorge.morales@colegio.local", maxHorasSemana: 28 },
-    { nombre: "Sofía Torres", email: "sofia.torres@colegio.local", maxHorasSemana: 24 },
+    { nombre: "María López", email: "maria.lopez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones.Primaria },
+    { nombre: "Juan Pérez", email: "juan.perez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones.Primaria },
+    { nombre: "Ana Rodríguez", email: "ana.rodriguez@colegio.local", maxHorasSemana: 28, seccionBaseId: secciones["Middle School"] },
+    { nombre: "Carlos Gómez", email: "carlos.gomez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones["Middle School"] },
+    { nombre: "Lucía Fernández", email: "lucia.fernandez@colegio.local", maxHorasSemana: 25, seccionBaseId: secciones.Preescolar },
+    { nombre: "Pedro Sánchez", email: "pedro.sanchez@colegio.local", maxHorasSemana: 26, seccionBaseId: secciones.Primaria },
+    { nombre: "Elena Ruiz", email: "elena.ruiz@colegio.local", maxHorasSemana: 25, seccionBaseId: secciones.Preescolar },
+    { nombre: "Jorge Morales", email: "jorge.morales@colegio.local", maxHorasSemana: 28, seccionBaseId: secciones["Middle School"] },
+    { nombre: "Sofía Torres", email: "sofia.torres@colegio.local", maxHorasSemana: 24, seccionBaseId: secciones.Diploma },
   ];
   for (const p of listaProfesores) {
     const prof = await prisma.profesor.create({ data: p });
@@ -246,15 +269,52 @@ async function main() {
     });
   }
 
+  console.log("Creando días de deportes...");
+  const deportes: { seccion: SeccionNombre; dia: number; periodo: string }[] = [
+    { seccion: "Primaria", dia: 2, periodo: "6" },
+    { seccion: "Primaria", dia: 4, periodo: "6" },
+    { seccion: "Middle School", dia: 1, periodo: "7" },
+    { seccion: "Middle School", dia: 3, periodo: "7" },
+    { seccion: "Diploma", dia: 1, periodo: "7" },
+    { seccion: "Diploma", dia: 3, periodo: "7" },
+  ];
+  for (const d of deportes) {
+    await prisma.deporteSeccion.create({
+      data: { seccionId: secciones[d.seccion], diaSemanaId: dias[d.dia].id, numeroPeriodo: d.periodo },
+    });
+  }
+
+  console.log("Creando reuniones de sección...");
+  // Preescolar jueves último bloque (09:50-10:30) | Primaria martes último bloque (12:10-13:00)
+  // Middle + Diploma miércoles (13:10-14:00, referencia último bloque de Middle)
+  const reuniones: { dia: number; inicio: string; fin: string; secciones: SeccionNombre[] }[] = [
+    { dia: 4, inicio: "09:50", fin: "10:30", secciones: ["Preescolar"] },
+    { dia: 2, inicio: "12:10", fin: "13:00", secciones: ["Primaria"] },
+    { dia: 3, inicio: "13:10", fin: "14:00", secciones: ["Middle School", "Diploma"] },
+  ];
+  for (const r of reuniones) {
+    await prisma.reunionSeccion.create({
+      data: {
+        diaSemanaId: dias[r.dia].id,
+        horaInicio: r.inicio,
+        horaFin: r.fin,
+        secciones: { connect: r.secciones.map((s) => ({ id: secciones[s] })) },
+      },
+    });
+  }
+
   const stats = {
     usuarios: await prisma.user.count(),
     secciones: await prisma.seccion.count(),
     dias: await prisma.diaSemana.count(),
     bloques: await prisma.bloqueHorario.count(),
     materias: await prisma.materia.count(),
+    departamentos: await prisma.departamento.count(),
     profesores: await prisma.profesor.count(),
     cursos: await prisma.curso.count(),
     cargas: await prisma.cargaAcademica.count(),
+    deportes: await prisma.deporteSeccion.count(),
+    reunionesSeccion: await prisma.reunionSeccion.count(),
   };
   console.log("Seed completado:", stats);
 }

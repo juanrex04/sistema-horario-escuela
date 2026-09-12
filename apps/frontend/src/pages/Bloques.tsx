@@ -1,43 +1,81 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, FilterX, CalendarClock } from "lucide-react";
 import { api } from "../lib/api";
-import { useCatalogQuery } from "../lib/queries";
+import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Pagination from "../components/Pagination";
+import TableSkeleton from "../components/TableSkeleton";
 import type { BloqueHorario, DiaSemana, Seccion } from "../lib/types";
 
-type FormState = { seccionId: string; diaSemanaId: string; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico: boolean };
+type FormState = { seccionId: string; dias: number[]; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico: boolean };
 
-const EMPTY: FormState = { seccionId: "", diaSemanaId: "", numeroPeriodo: "", horaInicio: "", horaFin: "", esAcademico: true };
+const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+
+const EMPTY: FormState = { seccionId: "", dias: [], numeroPeriodo: "", horaInicio: "", horaFin: "", esAcademico: true };
 
 export default function Bloques() {
   const qc = useQueryClient();
   const [fSeccion, setFSeccion] = useState("");
   const [fDia, setFDia] = useState("");
   const [fTipo, setFTipo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
-  const { data: bloques = [], isLoading } = useCatalogQuery<BloqueHorario[]>("bloques", "/bloques", {
+  const filtros = {
     seccionId: fSeccion,
     diaSemanaId: fDia,
     esAcademico: fTipo || undefined,
-  });
+  };
+
+  const { data: bloques = [] } = useCatalogQuery<BloqueHorario[]>("bloques", "/bloques", filtros);
+
+  const { data: pageData, isLoading: isLoadingTabla } = usePaginatedQuery<BloqueHorario>("bloques-list", "/bloques", filtros, page, pageSize);
+  const bloquesList = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
 
   const { data: secciones = [] } = useQuery({ queryKey: ["secciones"], queryFn: () => api.get<Seccion[]>("/secciones") });
   const { data: dias = [] } = useQuery({ queryKey: ["dias"], queryFn: () => api.get<DiaSemana[]>("/dias") });
+  const { data: bloquesTodos = [] } = useQuery({ queryKey: ["bloques-form"], queryFn: () => api.get<BloqueHorario[]>("/bloques") });
+
+  const seccionId = fSeccion ? Number(fSeccion) : null;
+  const seccionActual = useMemo(() => secciones.find((s) => s.id === seccionId), [secciones, seccionId]);
+
+  const grid = useMemo(() => {
+    if (!seccionId) return null;
+    const secBloques = bloques
+      .filter((b) => b.seccionId === seccionId)
+      .sort((a, b) => (a.horaInicio < b.horaInicio ? -1 : 1));
+    const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values());
+    const cells: Record<string, BloqueHorario | undefined> = {};
+    for (const b of secBloques) cells[`${b.diaSemanaId}-${b.numeroPeriodo}`] = b;
+    return { periods, cells };
+  }, [seccionId, bloques]);
 
   const [editing, setEditing] = useState<BloqueHorario | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [formOpen, setFormOpen] = useState(false);
   const [toDelete, setToDelete] = useState<BloqueHorario | null>(null);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["bloques"] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["bloques"] });
+    qc.invalidateQueries({ queryKey: ["bloques-list"] });
+  };
 
   const create = useMutation({
-    mutationFn: (data: Omit<BloqueHorario, "id">) => api.post("/bloques", data),
+    mutationFn: (data: {
+      seccionId: number;
+      diaSemanaIds: number[];
+      numeroPeriodo: string;
+      horaInicio: string;
+      horaFin: string;
+      esAcademico: boolean;
+    }) => api.post("/bloques", data),
     onSuccess: () => {
       invalidate();
+      qc.invalidateQueries({ queryKey: ["bloques-form"] });
       setFormOpen(false);
       setEditing(null);
       setForm(EMPTY);
@@ -63,9 +101,11 @@ export default function Bloques() {
     },
   });
 
+  const diasLunJue = dias.filter((d) => d.numeroDia >= 1 && d.numeroDia <= 4).map((d) => d.id);
+
   function openCreate() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, dias: diasLunJue });
     setFormOpen(true);
   }
 
@@ -73,7 +113,7 @@ export default function Bloques() {
     setEditing(b);
     setForm({
       seccionId: String(b.seccionId),
-      diaSemanaId: String(b.diaSemanaId),
+      dias: [b.diaSemanaId],
       numeroPeriodo: b.numeroPeriodo,
       horaInicio: b.horaInicio.slice(0, 5),
       horaFin: b.horaFin.slice(0, 5),
@@ -91,7 +131,7 @@ export default function Bloques() {
     e.preventDefault();
     const data = {
       seccionId: Number(form.seccionId),
-      diaSemanaId: Number(form.diaSemanaId),
+      diaSemanaIds: form.dias,
       numeroPeriodo: form.numeroPeriodo.trim(),
       horaInicio: form.horaInicio,
       horaFin: form.horaFin,
@@ -103,10 +143,31 @@ export default function Bloques() {
 
   const timeInvalid = form.horaInicio && form.horaFin && form.horaFin <= form.horaInicio;
 
+  const conflicto = useMemo(() => {
+    if (!form.seccionId || !form.numeroPeriodo.trim() || form.dias.length === 0) return [];
+    const sid = Number(form.seccionId);
+    const per = form.numeroPeriodo.trim().toUpperCase();
+    return bloquesTodos.filter((b) => b.seccionId === sid && b.numeroPeriodo.toUpperCase() === per && form.dias.includes(b.diaSemanaId));
+  }, [form.seccionId, form.numeroPeriodo, form.dias, bloquesTodos]);
+
+  function toggleDia(id: number) {
+    if (editing) return;
+    setForm((prev) => ({
+      ...prev,
+      dias: prev.dias.includes(id) ? prev.dias.filter((d) => d !== id) : [...prev.dias, id],
+    }));
+  }
+
+  const nombreDia = (id: number) => {
+    const nd = dias.find((d) => d.id === id)?.numeroDia;
+    return nd ? DIAS[nd - 1] : `Día ${id}`;
+  };
+
   function clearFilters() {
     setFSeccion("");
     setFDia("");
     setFTipo("");
+    setPage(1);
   }
 
   const filtersActive = fSeccion || fDia || fTipo;
@@ -119,21 +180,21 @@ export default function Bloques() {
       </header>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
-        <SelectField label="Sección" emptyLabel="Todas" value={fSeccion} onChange={(e) => setFSeccion(e.target.value)} wrapper="w-44">
+        <SelectField label="Sección" emptyLabel="Todas" value={fSeccion} onChange={(e) => { setFSeccion(e.target.value); setPage(1); }} wrapper="w-44">
           {secciones.map((s) => (
             <option key={s.id} value={s.id}>
               {s.nombre}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Día" emptyLabel="Todos" value={fDia} onChange={(e) => setFDia(e.target.value)} wrapper="w-36">
+        <SelectField label="Día" emptyLabel="Todos" value={fDia} onChange={(e) => { setFDia(e.target.value); setPage(1); }} wrapper="w-36">
           {dias.map((d) => (
             <option key={d.id} value={d.id}>
               Día {d.numeroDia}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Tipo" emptyLabel="Todos" value={fTipo} onChange={(e) => setFTipo(e.target.value)} wrapper="w-36">
+        <SelectField label="Tipo" emptyLabel="Todos" value={fTipo} onChange={(e) => { setFTipo(e.target.value); setPage(1); }} wrapper="w-36">
           <option value="true">Académico</option>
           <option value="false">No académico</option>
         </SelectField>
@@ -154,6 +215,87 @@ export default function Bloques() {
         </button>
       </div>
 
+      {fSeccion ? (
+        <section className="rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+            <h2 className="text-base font-semibold text-slate-800">Distribución de bloques</h2>
+            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+              Sección: {seccionActual?.nombre}
+            </span>
+          </div>
+          {grid && grid.periods.length > 0 ? (
+            <div className="overflow-x-auto p-4">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium text-slate-600">Período</th>
+                    {DIAS.map((d) => (
+                      <th key={d} className="px-4 py-3 text-left font-medium text-slate-600">
+                        {d}
+                        {d === "Viernes" && <span className="ml-1 text-xs text-amber-600">(esp.)</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {grid.periods.map((p) => (
+                    <tr key={p.numeroPeriodo}>
+                      <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                        <span className="font-medium text-slate-800">{p.numeroPeriodo}</span>
+                        <span className="ml-2 text-xs text-slate-400">
+                          {p.horaInicio}-{p.horaFin}
+                        </span>
+                      </td>
+                      {DIAS.map((_, i) => {
+                        const cell = grid.cells[`${i + 1}-${p.numeroPeriodo}`];
+                        return (
+                          <td key={i} className="px-3 py-2">
+                            {cell ? (
+                              cell.esAcademico ? (
+                                <div className="rounded-lg bg-indigo-50 px-3 py-2">
+                                  <p className="font-semibold text-indigo-800">{cell.numeroPeriodo}</p>
+                                  <p className="text-xs text-indigo-600">
+                                    {cell.horaInicio}-{cell.horaFin} · Académico
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="rounded-lg bg-amber-50 px-3 py-2">
+                                  <p className="font-semibold text-amber-700">{cell.numeroPeriodo}</p>
+                                  <p className="text-xs text-amber-600">
+                                    {cell.horaInicio}-{cell.horaFin} · Recreo
+                                  </p>
+                                </div>
+                              )
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="px-4 py-8 text-center text-sm text-slate-400">
+              Esta sección aún no tiene bloques definidos.
+            </p>
+          )}
+        </section>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-4 py-12 text-center">
+          <CalendarClock className="mb-3 h-10 w-10 text-slate-300" />
+          <p className="text-sm font-medium text-slate-600">
+            Hasta que no selecciones una sección no se mostrará la distribución de los bloques.
+          </p>
+          <p className="mt-1 text-xs text-slate-400">Usa el filtro de sección de arriba para visualizar la grilla.</p>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-slate-800">Listado y gestión de bloques</h2>
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50">
@@ -169,14 +311,8 @@ export default function Bloques() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
-                  Cargando...
-                </td>
-              </tr>
-            )}
-            {!isLoading && bloques.length === 0 && (
+            {isLoadingTabla && <TableSkeleton cols={8} />}
+            {!isLoadingTabla && bloquesList.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
                   <Search className="mx-auto mb-2 h-5 w-5" />
@@ -184,7 +320,7 @@ export default function Bloques() {
                 </td>
               </tr>
             )}
-            {bloques.map((b) => (
+            {bloquesList.map((b) => (
               <tr key={b.id}>
                 <td className="px-4 py-3 font-medium text-slate-800">{b.seccion?.nombre}</td>
                 <td className="px-4 py-3 text-slate-600">Día {b.diaSemana?.numeroDia}</td>
@@ -223,6 +359,16 @@ export default function Bloques() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPage={setPage}
+          onPageSize={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+        />
       </div>
 
       <Modal
@@ -242,13 +388,62 @@ export default function Bloques() {
               </option>
             ))}
           </SelectField>
-          <SelectField label="Día *" required value={form.diaSemanaId} onChange={(e) => setForm({ ...form, diaSemanaId: e.target.value })} emptyLabel="Selecciona día...">
-            {dias.map((d) => (
-              <option key={d.id} value={d.id}>
-                Día {d.numeroDia}
-              </option>
-            ))}
-          </SelectField>
+          {editing ? (
+            <p className="text-sm text-slate-700">
+              Día: <span className="font-medium">{nombreDia(editing.diaSemanaId)}</span>
+            </p>
+          ) : (
+            <div>
+              <span className="mb-2 block text-sm font-medium text-slate-700">
+                Días a los que aplica este período *
+              </span>
+              <div className="flex gap-2 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, dias: diasLunJue }))}
+                  className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                >
+                  Lun–Jue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = dias.find((d) => d.numeroDia === 5);
+                    if (v) setForm((prev) => ({ ...prev, dias: [v.id] }));
+                  }}
+                  className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                >
+                  Viernes
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {dias.map((d) => (
+                  <label
+                    key={d.id}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
+                      form.dias.includes(d.id) ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-300 bg-white text-slate-600"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.dias.includes(d.id)}
+                      onChange={() => toggleDia(d.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    {nombreDia(d.id)}
+                  </label>
+                ))}
+              </div>
+              {form.dias.length === 0 && <p className="mt-1 text-sm text-red-600">Selecciona al menos un día.</p>}
+              {conflicto.length > 0 && (
+                <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Ya existe bloque para esta sección y período en{" "}
+                  {conflicto.map((b) => nombreDia(b.diaSemanaId)).join(", ")} (hora actual {conflicto[0].horaInicio}–{conflicto[0].horaFin}).
+                  Se sobrescribirá con el nuevo horario en esos días.
+                </p>
+              )}
+            </div>
+          )}
           <TextField
             label="Período *"
             required
@@ -289,7 +484,7 @@ export default function Bloques() {
             </button>
             <button
               type="submit"
-              disabled={!form.seccionId || !form.diaSemanaId || !form.numeroPeriodo.trim() || !form.horaInicio || !form.horaFin || timeInvalid || create.isPending || update.isPending}
+              disabled={!form.seccionId || form.dias.length === 0 || !form.numeroPeriodo.trim() || !form.horaInicio || !form.horaFin || timeInvalid || create.isPending || update.isPending}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}

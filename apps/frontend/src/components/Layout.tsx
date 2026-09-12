@@ -9,6 +9,9 @@ import {
   School,
   GraduationCap,
   BookMarked,
+  Layers,
+  Settings,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -25,10 +28,16 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/docentes", label: "Docentes", icon: Users },
       { to: "/cursos", label: "Cursos", icon: GraduationCap },
+      { to: "/secciones", label: "Secciones", icon: Building2 },
       { to: "/materias", label: "Materias", icon: BookMarked },
+      { to: "/departamentos", label: "Departamentos", icon: Layers },
       { to: "/cargas", label: "Cargas Académicas", icon: BookOpen },
       { to: "/bloques", label: "Configuración de Bloques", icon: CalendarClock },
     ],
+  },
+  {
+    label: "Reglas de negocio",
+    items: [{ to: "/reglas", label: "Reuniones y Deportes", icon: Settings }],
   },
 ];
 

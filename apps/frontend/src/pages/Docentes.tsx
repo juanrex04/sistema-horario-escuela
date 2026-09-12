@@ -2,25 +2,34 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
-import { useCatalogQuery } from "../lib/queries";
+import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import type { Profesor } from "../lib/types";
+import Pagination from "../components/Pagination";
+import TableSkeleton from "../components/TableSkeleton";
+import type { Profesor, Seccion } from "../lib/types";
 
-type FormState = { nombre: string; email: string; maxHorasSemana: string };
+type FormState = { nombre: string; email: string; maxHorasSemana: string; seccionBaseId: string };
 
-const EMPTY: FormState = { nombre: "", email: "", maxHorasSemana: "" };
+const EMPTY: FormState = { nombre: "", email: "", maxHorasSemana: "", seccionBaseId: "" };
 
 export default function Docentes() {
   const qc = useQueryClient();
   const [fq, setFq] = useState("");
   const [tieneCargas, setTieneCargas] = useState("");
+  const [fSeccionBase, setFSeccionBase] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
-  const { data: profesores = [], isLoading } = useCatalogQuery<Profesor[]>("profesores", "/profesores", {
+  const { data: pageData, isLoading } = usePaginatedQuery<Profesor>("profesores", "/profesores", {
     q: fq,
     tieneCargas,
-  });
+    seccionBaseId: fSeccionBase,
+  }, page, pageSize);
+  const profesores = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
+  const { data: secciones = [] } = useCatalogQuery<Seccion[]>("secciones", "/secciones");
 
   const [editing, setEditing] = useState<Profesor | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -67,7 +76,7 @@ export default function Docentes() {
 
   function openEdit(p: Profesor) {
     setEditing(p);
-    setForm({ nombre: p.nombre, email: p.email ?? "", maxHorasSemana: p.maxHorasSemana ? String(p.maxHorasSemana) : "" });
+    setForm({ nombre: p.nombre, email: p.email ?? "", maxHorasSemana: p.maxHorasSemana ? String(p.maxHorasSemana) : "", seccionBaseId: String(p.seccionBaseId) });
     setFormOpen(true);
   }
 
@@ -82,6 +91,7 @@ export default function Docentes() {
       nombre: form.nombre.trim(),
       email: form.email.trim() || undefined,
       maxHorasSemana: form.maxHorasSemana ? Number(form.maxHorasSemana) : undefined,
+      seccionBaseId: Number(form.seccionBaseId),
     };
     if (editing) update.mutate({ id: editing.id, data });
     else create.mutate(data);
@@ -99,25 +109,40 @@ export default function Docentes() {
           label="Buscar por nombre o email"
           placeholder="María, juan@colegio..."
           value={fq}
-          onChange={(e) => setFq(e.target.value)}
+          onChange={(e) => { setFq(e.target.value); setPage(1); }}
           wrapper="min-w-64 flex-1"
         />
         <SelectField
           label="Con carga asignada"
           emptyLabel="Todas"
           value={tieneCargas}
-          onChange={(e) => setTieneCargas(e.target.value)}
-          wrapper="w-48"
+          onChange={(e) => { setTieneCargas(e.target.value); setPage(1); }}
+          wrapper="w-44"
         >
           <option value="true">Con carga</option>
           <option value="false">Sin carga</option>
+        </SelectField>
+        <SelectField
+          label="Sección de adscripción"
+          emptyLabel="Todas"
+          value={fSeccionBase}
+          onChange={(e) => { setFSeccionBase(e.target.value); setPage(1); }}
+          wrapper="w-52"
+        >
+          {secciones.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.nombre}
+            </option>
+          ))}
         </SelectField>
         <button
           onClick={() => {
             setFq("");
             setTieneCargas("");
+            setFSeccionBase("");
+            setPage(1);
           }}
-          disabled={!fq && !tieneCargas}
+          disabled={!fq && !tieneCargas && !fSeccionBase}
           className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
         >
           <FilterX className="h-4 w-4" />
@@ -137,6 +162,7 @@ export default function Docentes() {
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Nombre</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Sección de adscripción</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Email</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Máx. horas/semana</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
@@ -144,16 +170,10 @@ export default function Docentes() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                  Cargando...
-                </td>
-              </tr>
-            )}
+            {isLoading && <TableSkeleton cols={6} />}
             {!isLoading && profesores.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                   <Search className="mx-auto mb-2 h-5 w-5" />
                   Sin resultados para los filtros aplicados.
                 </td>
@@ -162,6 +182,11 @@ export default function Docentes() {
             {profesores.map((p) => (
               <tr key={p.id}>
                 <td className="px-4 py-3 font-medium text-slate-800">{p.nombre}</td>
+                <td className="px-4 py-3 text-slate-600">
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
+                    {p.seccionBase?.nombre ?? "-"}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-slate-600">{p.email ?? "-"}</td>
                 <td className="px-4 py-3 text-slate-600">{p.maxHorasSemana ?? "-"}</td>
                 <td className="px-4 py-3">
@@ -189,6 +214,16 @@ export default function Docentes() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPage={setPage}
+          onPageSize={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+        />
       </div>
 
       <Modal
@@ -209,6 +244,19 @@ export default function Docentes() {
             placeholder="Prof. Nombre"
             wrapper=""
           />
+          <SelectField
+            label="Sección de adscripción *"
+            required
+            value={form.seccionBaseId}
+            onChange={(e) => setForm({ ...form, seccionBaseId: e.target.value })}
+            wrapper=""
+          >
+            {secciones.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nombre}
+              </option>
+            ))}
+          </SelectField>
           <TextField
             label="Email"
             type="email"
@@ -245,7 +293,7 @@ export default function Docentes() {
             </button>
             <button
               type="submit"
-              disabled={!form.nombre.trim() || create.isPending || update.isPending}
+              disabled={!form.nombre.trim() || !form.seccionBaseId || create.isPending || update.isPending}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}

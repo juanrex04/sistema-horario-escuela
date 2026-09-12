@@ -18,17 +18,23 @@ model User {
 }
 
 model Seccion {
-  id     Int    @id @default(autoincrement())
-  nombre String @unique
-  bloques BloqueHorario[]
-  cursos  Curso[]
+  id                  Int        @id @default(autoincrement())
+  nombre              String     @unique
+  bloques             BloqueHorario[]
+  cursos              Curso[]
+  reunionSecciones    ReunionSeccion[] @relation("ReunionSeccionSeccion")
+  deportes            DeporteSeccion[]
+  profesoresAdscritos Profesor[]
 }
 
 model DiaSemana {
-  id                  Int    @id @default(autoincrement())
-  numeroDia           Int    @unique
-  esHorarioEspecial   Boolean @default(false)
-  bloques             BloqueHorario[]
+  id                Int    @id @default(autoincrement())
+  numeroDia         Int    @unique
+  esHorarioEspecial Boolean @default(false)
+  bloques           BloqueHorario[]
+  reunionSecciones  ReunionSeccion[]
+  deportes          DeporteSeccion[]
+  colaborativas     ColaborativaGenerada[]
 }
 
 model BloqueHorario {
@@ -47,11 +53,13 @@ model BloqueHorario {
 }
 
 model Profesor {
-  id              Int      @id @default(autoincrement())
-  nombre          String
-  email           String?  @unique
-  maxHorasSemana  Int?
-  cargas          CargaAcademica[]
+  id             Int      @id @default(autoincrement())
+  nombre         String
+  email          String?  @unique
+  maxHorasSemana Int?
+  seccionBase    Seccion  @relation(fields: [seccionBaseId], references: [id], onDelete: Restrict)
+  seccionBaseId  Int
+  cargas         CargaAcademica[]
 }
 
 model Curso {
@@ -65,9 +73,49 @@ model Curso {
 }
 
 model Materia {
-  id     Int    @id @default(autoincrement())
-  nombre String @unique
-  cargas CargaAcademica[]
+  id             Int           @id @default(autoincrement())
+  nombre         String        @unique
+  departamento   Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  departamentoId Int?
+  cargas         CargaAcademica[]
+}
+
+model Departamento {
+  id             Int                   @id @default(autoincrement())
+  nombre         String                @unique
+  reunionActiva  Boolean               @default(false)
+  materias       Materia[]
+  colaborativas  ColaborativaGenerada[]
+}
+
+model ReunionSeccion {
+  id          Int           @id @default(autoincrement())
+  diaSemanaId Int
+  diaSemana   DiaSemana     @relation(fields: [diaSemanaId], references: [id], onDelete: Cascade)
+  horaInicio  String
+  horaFin     String
+  secciones   Seccion[]     @relation("ReunionSeccionSeccion")
+}
+
+model DeporteSeccion {
+  id            Int         @id @default(autoincrement())
+  seccionId     Int
+  seccion       Seccion     @relation(fields: [seccionId], references: [id], onDelete: Cascade)
+  diaSemanaId   Int
+  diaSemana     DiaSemana   @relation(fields: [diaSemanaId], references: [id], onDelete: Cascade)
+  numeroPeriodo String
+
+  @@unique([seccionId, diaSemanaId, numeroPeriodo])
+}
+
+model ColaborativaGenerada {
+  id             Int           @id @default(autoincrement())
+  departamentoId Int
+  departamento   Departamento  @relation(fields: [departamentoId], references: [id], onDelete: Cascade)
+  diaSemanaId    Int
+  diaSemana      DiaSemana     @relation(fields: [diaSemanaId], references: [id], onDelete: Cascade)
+  horaInicio     String
+  horaFin        String
 }
 
 model CargaAcademica {

@@ -1,62 +1,57 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
 import { usePaginatedQuery } from "../lib/queries";
-import { SelectField, TextField } from "../components/fields";
+import { TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
-import type { Curso, Seccion } from "../lib/types";
+import type { Seccion } from "../lib/types";
 
-type FormState = { seccionId: string; nombre: string };
-const EMPTY: FormState = { seccionId: "", nombre: "" };
-
-export default function Cursos() {
+export default function Secciones() {
   const qc = useQueryClient();
-  const [fSeccion, setFSeccion] = useState("");
   const [fq, setFq] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  const { data: pageData, isLoading } = usePaginatedQuery<Curso>("cursos-list", "/cursos", {
-    seccionId: fSeccion,
-    q: fq,
-  }, page, pageSize);
-  const cursos = pageData?.items ?? [];
+  const { data: pageData, isLoading } = usePaginatedQuery<Seccion>("secciones-list", "/secciones", { q: fq }, page, pageSize);
+  const secciones = pageData?.items ?? [];
   const total = pageData?.total ?? 0;
-  const { data: secciones = [] } = useQuery({ queryKey: ["secciones"], queryFn: () => api.get<Seccion[]>("/secciones") });
 
-  const [editing, setEditing] = useState<Curso | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [editing, setEditing] = useState<Seccion | null>(null);
+  const [nombre, setNombre] = useState("");
   const [formOpen, setFormOpen] = useState(false);
-  const [toDelete, setToDelete] = useState<Curso | null>(null);
+  const [toDelete, setToDelete] = useState<Seccion | null>(null);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["cursos-list"] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["secciones-list"] });
+    qc.invalidateQueries({ queryKey: ["secciones"] });
+  };
 
   const create = useMutation({
-    mutationFn: (data: { seccionId: number; nombre: string }) => api.post("/cursos", data),
+    mutationFn: (data: { nombre: string }) => api.post("/secciones", data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
-      setForm(EMPTY);
+      setNombre("");
     },
   });
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Curso> }) => api.patch(`/cursos/${id}`, data),
+    mutationFn: ({ id, data }: { id: number; data: { nombre: string } }) => api.patch(`/secciones/${id}`, data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
-      setForm(EMPTY);
+      setNombre("");
     },
   });
 
   const remove = useMutation({
-    mutationFn: (id: number) => api.delete(`/cursos/${id}`),
+    mutationFn: (id: number) => api.delete(`/secciones/${id}`),
     onSuccess: () => {
       invalidate();
       setToDelete(null);
@@ -65,58 +60,48 @@ export default function Cursos() {
   });
 
   function openCreate() {
+    create.reset();
     setEditing(null);
-    setForm(EMPTY);
+    setNombre("");
     setFormOpen(true);
   }
 
-  function openEdit(c: Curso) {
-    setEditing(c);
-    setForm({ seccionId: String(c.seccionId), nombre: c.nombre });
+  function openEdit(s: Seccion) {
+    update.reset();
+    setEditing(s);
+    setNombre(s.nombre);
     setFormOpen(true);
   }
 
-  function openDelete(c: Curso) {
+  function openDelete(s: Seccion) {
     remove.reset();
-    setToDelete(c);
+    setToDelete(s);
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { seccionId: Number(form.seccionId), nombre: form.nombre.trim() };
-    if (editing) update.mutate({ id: editing.id, data });
-    else create.mutate(data);
+    if (editing) update.mutate({ id: editing.id, data: { nombre: nombre.trim() } });
+    else create.mutate({ nombre: nombre.trim() });
   }
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Cursos</h1>
-        <p className="text-sm text-slate-500">Grupos de estudiantes organizados por sección.</p>
+        <h1 className="text-2xl font-semibold text-slate-800">Secciones</h1>
+        <p className="text-sm text-slate-500">Niveles del colegio. Agrupan cursos, bloques de horario y docentes adscritos.</p>
       </header>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
-        <SelectField label="Sección" emptyLabel="Todas" value={fSeccion} onChange={(e) => { setFSeccion(e.target.value); setPage(1); }} wrapper="w-44">
-          {secciones.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.nombre}
-            </option>
-          ))}
-        </SelectField>
         <TextField
           label="Buscar por nombre"
           value={fq}
           onChange={(e) => { setFq(e.target.value); setPage(1); }}
-          placeholder="1A, 2B..."
+          placeholder="Primaria, Middle..."
           wrapper="min-w-56 flex-1"
         />
         <button
-          onClick={() => {
-            setFSeccion("");
-            setFq("");
-            setPage(1);
-          }}
-          disabled={!fSeccion && !fq}
+          onClick={() => { setFq(""); setPage(1); }}
+          disabled={!fq}
           className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
         >
           <FilterX className="h-4 w-4" />
@@ -127,7 +112,7 @@ export default function Cursos() {
           className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
-          Nuevo curso
+          Nueva sección
         </button>
       </div>
 
@@ -135,43 +120,41 @@ export default function Cursos() {
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Curso</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Sección</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
+              <th className="px-4 py-3 text-center font-medium text-slate-600">Cursos</th>
+              <th className="px-4 py-3 text-center font-medium text-slate-600">Bloques</th>
+              <th className="px-4 py-3 text-center font-medium text-slate-600">Docentes adscritos</th>
               <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && <TableSkeleton cols={4} />}
-            {!isLoading && cursos.length === 0 && (
+            {isLoading && <TableSkeleton cols={5} />}
+            {!isLoading && secciones.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
                   <Search className="mx-auto mb-2 h-5 w-5" />
                   Sin resultados para los filtros aplicados.
                 </td>
               </tr>
             )}
-            {cursos.map((c) => (
-              <tr key={c.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">{c.nombre}</td>
-                <td className="px-4 py-3 text-slate-600">{c.seccion?.nombre}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    {c._count?.cargas ?? 0}
-                  </span>
+            {secciones.map((s) => (
+              <tr key={s.id}>
+                <td className="px-4 py-3 font-medium text-slate-800">{s.nombre}</td>
+                <td className="px-4 py-3 text-center">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{s._count?.cursos ?? 0}</span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{s._count?.bloques ?? 0}</span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">{s._count?.profesoresAdscritos ?? 0}</span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex gap-1">
-                    <button
-                      onClick={() => openEdit(c)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
-                    >
+                    <button onClick={() => openEdit(s)} className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600">
                       <Pencil className="h-4 w-4" />
                     </button>
-                    <button
-                      onClick={() => openDelete(c)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                    >
+                    <button onClick={() => openDelete(s)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -194,22 +177,15 @@ export default function Cursos() {
 
       <Modal
         open={formOpen}
-        title={editing ? "Editar curso" : "Nuevo curso"}
+        title={editing ? "Editar sección" : "Nueva sección"}
         onClose={() => {
           setFormOpen(false);
           setEditing(null);
-          setForm(EMPTY);
+          setNombre("");
         }}
       >
         <form onSubmit={submit} className="space-y-4">
-          <SelectField label="Sección *" required value={form.seccionId} onChange={(e) => setForm({ ...form, seccionId: e.target.value })} emptyLabel="Selecciona sección...">
-            {secciones.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nombre}
-              </option>
-            ))}
-          </SelectField>
-          <TextField label="Nombre del curso *" required value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="1A" />
+          <TextField label="Nombre *" required value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Primaria" />
           {(create.error || update.error) && (
             <p className="text-sm text-red-600">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
@@ -221,7 +197,7 @@ export default function Cursos() {
               onClick={() => {
                 setFormOpen(false);
                 setEditing(null);
-                setForm(EMPTY);
+                setNombre("");
               }}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -229,7 +205,7 @@ export default function Cursos() {
             </button>
             <button
               type="submit"
-              disabled={!form.seccionId || !form.nombre.trim() || create.isPending || update.isPending}
+              disabled={!nombre.trim() || create.isPending || update.isPending}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
@@ -240,8 +216,8 @@ export default function Cursos() {
 
       <ConfirmDialog
         open={toDelete !== null}
-        title="Eliminar curso"
-        message={`¿Eliminar el curso "${toDelete?.nombre}" (${toDelete?.seccion?.nombre})? Los cursos con cargas asignadas no se pueden eliminar.`}
+        title="Eliminar sección"
+        message={`¿Eliminar la sección "${toDelete?.nombre}"? Solo se puede borrar si no tiene docentes adscritos, cursos ni bloques.`}
         loading={remove.isPending}
         error={remove.isError ? remove.error.message : null}
         onCancel={() => {
