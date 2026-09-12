@@ -17,7 +17,8 @@ import type {
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 
 type ReunionDraft = { diaSemanaId: number; horaInicio: string; horaFin: string; seccionIds: number[] };
-type DeporteDraft = { seccionId: number; diaSemanaId: number; numeroPeriodo: string };
+type DeporteDraft = { seccionId: number; diaSemanaIds: number[]; numeroPeriodo: string };
+type DeporteFila = { seccionId: number; diaSemanaId: number; numeroPeriodo: string };
 
 export default function Reglas() {
   const qc = useQueryClient();
@@ -33,7 +34,15 @@ export default function Reglas() {
         seccionIds: r.secciones.map((s) => s.id),
       }))
     );
-    setDeportes(data.deportes.map((d) => ({ seccionId: d.seccionId, diaSemanaId: d.diaSemanaId, numeroPeriodo: d.numeroPeriodo })));
+    const agrupados = new Map<string, DeporteDraft>();
+    for (const d of data.deportes) {
+      const k = `${d.seccionId}_${d.numeroPeriodo}`;
+      const e = agrupados.get(k) ?? { seccionId: d.seccionId, diaSemanaIds: [], numeroPeriodo: d.numeroPeriodo };
+      if (!e.diaSemanaIds.includes(d.diaSemanaId)) e.diaSemanaIds.push(d.diaSemanaId);
+      agrupados.set(k, e);
+    }
+    for (const e of agrupados.values()) e.diaSemanaIds.sort((a, b) => a - b);
+    setDeportes(Array.from(agrupados.values()));
   };
 
   const { data: reglas, dataUpdatedAt, refetch: refetchReglas } = useQuery({
@@ -60,7 +69,7 @@ export default function Reglas() {
 
   const [deporteOpen, setDeporteOpen] = useState(false);
   const [deporteIdx, setDeporteIdx] = useState<number | null>(null);
-  const [dDraft, setDDraft] = useState<DeporteDraft>({ seccionId: 0, diaSemanaId: 0, numeroPeriodo: "" });
+  const [dDraft, setDDraft] = useState<DeporteDraft>({ seccionId: 0, diaSemanaIds: [], numeroPeriodo: "" });
 
   const toggle = useMutation({
     mutationFn: ({ id, reunionActiva }: { id: number; reunionActiva: boolean }) =>
@@ -69,7 +78,7 @@ export default function Reglas() {
   });
 
   const save = useMutation({
-    mutationFn: (payload: { reunionesSeccion: ReunionDraft[]; deportes: DeporteDraft[] }) =>
+    mutationFn: (payload: { reunionesSeccion: ReunionDraft[]; deportes: DeporteFila[] }) =>
       api.put<Reglas>("/reglas", payload),
     onSuccess: (data) => {
       qc.setQueryData(["reglas"], data);
@@ -81,9 +90,14 @@ export default function Reglas() {
   });
 
   const guardarReuniones = (r: ReunionDraft[]) =>
-    save.mutate({ reunionesSeccion: r, deportes });
+    save.mutate({ reunionesSeccion: r, deportes: expandeDeportes(deportes) });
   const guardarDeportes = (d: DeporteDraft[]) =>
-    save.mutate({ reunionesSeccion: reuniones, deportes: d });
+    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(d) });
+
+  const expandeDeportes = (d: DeporteDraft[]): DeporteFila[] =>
+    d.flatMap((dep) =>
+      dep.diaSemanaIds.map((dia) => ({ seccionId: dep.seccionId, diaSemanaId: dia, numeroPeriodo: dep.numeroPeriodo }))
+    );
 
   const periodosDeSeccion = (seccionId: number): string[] => {
     if (!seccionId) return [];
@@ -124,7 +138,7 @@ export default function Reglas() {
 
   const openNuevoDeporte = () => {
     setDeporteIdx(null);
-    setDDraft({ seccionId: secciones[0]?.id ?? 0, diaSemanaId: dias[0]?.id ?? 0, numeroPeriodo: "" });
+    setDDraft({ seccionId: secciones[0]?.id ?? 0, diaSemanaIds: dias[0]?.id ? [dias[0].id] : [], numeroPeriodo: "" });
     setDeporteOpen(true);
   };
 
@@ -155,9 +169,10 @@ export default function Reglas() {
     setRDraft((prev) =>
       dias.some((d) => d.id === prev.diaSemanaId) ? prev : { ...prev, diaSemanaId: dias[0].id }
     );
-    setDDraft((prev) =>
-      dias.some((d) => d.id === prev.diaSemanaId) ? prev : { ...prev, diaSemanaId: dias[0].id }
-    );
+    setDDraft((prev) => {
+      const validos = prev.diaSemanaIds.filter((id) => dias.some((d) => d.id === id));
+      return validos.length ? { ...prev, diaSemanaIds: validos } : { ...prev, diaSemanaIds: [dias[0].id] };
+    });
   }, [dias]);
 
   return (
@@ -257,7 +272,8 @@ export default function Reglas() {
             <div key={i} className="flex items-center justify-between gap-4 px-5 py-3">
               <div>
                 <p className="font-medium text-slate-800">
-                  {secciones.find((s) => s.id === d.seccionId)?.nombre ?? "?"} — {nombreDia(d.diaSemanaId)}, período {d.numeroPeriodo}
+                  {secciones.find((s) => s.id === d.seccionId)?.nombre ?? "?"} —{" "}
+                  {d.diaSemanaIds.map(nombreDia).join(", ")}, período {d.numeroPeriodo}
                 </p>
               </div>
               <div className="flex gap-1">
@@ -413,18 +429,35 @@ export default function Reglas() {
               </option>
             ))}
           </SelectField>
-          <SelectField
-            label="Día de la semana *"
-            value={dDraft.diaSemanaId}
-            emptyLabel=""
-            onChange={(e) => setDDraft({ ...dDraft, diaSemanaId: Number(e.target.value) })}
-          >
-            {dias.map((d) => (
-              <option key={d.id} value={d.id}>
-                Día {d.numeroDia} · {DIAS[d.numeroDia - 1]}
-              </option>
-            ))}
-          </SelectField>
+          <div>
+            <p className="mb-1 block text-xs font-medium text-slate-600">
+              Días de la semana (puedes marcar varios) *
+            </p>
+            <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+              {dias.map((d) => (
+                <label key={d.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={dDraft.diaSemanaIds.includes(d.id)}
+                    onChange={() =>
+                      setDDraft((prev) => ({
+                        ...prev,
+                        diaSemanaIds: prev.diaSemanaIds.includes(d.id)
+                          ? prev.diaSemanaIds.filter((id) => id !== d.id)
+                          : [...prev.diaSemanaIds, d.id],
+                      }))
+                    }
+                  />
+                  <span className="text-slate-700">
+                    Día {d.numeroDia} · {DIAS[d.numeroDia - 1]}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              El bloque (período) se reserva en todos los días marcados.
+            </p>
+          </div>
           <SelectField
             label="Período *"
             value={dDraft.numeroPeriodo}
@@ -443,7 +476,7 @@ export default function Reglas() {
             </button>
             <button
               onClick={guardarDeporte}
-              disabled={!dDraft.seccionId || !dias.some((d) => d.id === dDraft.diaSemanaId) || !dDraft.numeroPeriodo || save.isPending}
+              disabled={!dDraft.seccionId || dDraft.diaSemanaIds.length === 0 || !dDraft.numeroPeriodo || save.isPending}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               Guardar
