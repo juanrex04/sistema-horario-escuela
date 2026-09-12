@@ -71,7 +71,10 @@ export default function Horario() {
   const generate = useMutation({
     mutationFn: () => api.post<import("../lib/types").GenerateResult>("/timetables/generate"),
     onSuccess: (data) => {
-      setFeedback(`Horario generado: estado ${data.status}, ${data.numAsignaciones} asignaciones.`);
+      const extra = data.numConsecutivos && data.numConsecutivos > 0
+        ? `, ${data.numConsecutivos} clases consecutivas entre grupos del mismo grado`
+        : "";
+      setFeedback(`Horario generado: estado ${data.status}, ${data.numAsignaciones} asignaciones${extra}.`);
       qc.invalidateQueries({ queryKey: ["resultado"] });
     },
     onError: (err) => setFeedback(err instanceof Error ? err.message : "Error al generar"),

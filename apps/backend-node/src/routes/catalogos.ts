@@ -1,4 +1,5 @@
 import { Router } from "express";
+import ExcelJS from "exceljs";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -26,6 +27,38 @@ const contains = (v?: string) => (v ? { contains: v, mode: "insensitive" as cons
 
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+
+const DIA_NOMBRES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+
+function normalizaTexto(v: string): string {
+  return v.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizaHora(v: unknown): string | null {
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || v < 0 || v >= 1) return null;
+    const total = Math.round(v * 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  }
+  if (typeof v !== "string") return null;
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(v.trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh > 23 || mm > 59) return null;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function parseAcademico(v: unknown): boolean | undefined {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number" && (v === 1 || v === 0)) return v === 1;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (["si", "sí", "1", "true"].includes(s)) return true;
+    if (["no", "0", "false"].includes(s)) return false;
+  }
+  return undefined;
+}
 
 function paginar(req: { query: Record<string, unknown> }) {
   const pageQuery = qs.num(req.query.page);
@@ -157,6 +190,63 @@ router.get("/bloques", async (req, res) => {
   res.json({ items, total, page, pageSize });
 });
 
+router.get("/bloques/plantilla", async (_req, res) => {
+  const secciones = await prisma.seccion.findMany({ orderBy: { nombre: "asc" }, select: { nombre: true } });
+  const listaSecciones = secciones.length ? secciones.map((s) => s.nombre).join(",") : "Sección";
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Bloques");
+  ws.columns = [
+    { header: "Sección", key: "seccion", width: 22 },
+    { header: "Día", key: "dia", width: 16 },
+    { header: "Período", key: "periodo", width: 16 },
+    { header: "Hora inicio", key: "horaInicio", width: 13 },
+    { header: "Hora fin", key: "horaFin", width: 13 },
+    { header: "¿Académico?", key: "academico", width: 14 },
+  ];
+  ws.getRow(1).font = { bold: true, color: { argb: "FF1F2937" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE5E7EB" } };
+  ws.getRow(1).alignment = { horizontal: "center", vertical: "middle" };
+  ws.getRow(1).height = 22;
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  const validaciones = (
+    ws as unknown as {
+      dataValidations: {
+        add: (address: string, validation: { type: string; formulae: string[]; allowBlank?: boolean }) => void;
+      };
+    }
+  ).dataValidations;
+  validaciones.add("A2:A2000", { type: "list", formulae: [`"${listaSecciones}"`], allowBlank: true });
+  validaciones.add("B2:B2000", { type: "list", formulae: [`"${DIA_NOMBRES.join(",")}"`], allowBlank: true });
+  validaciones.add("F2:F2000", { type: "list", formulae: [`"Sí,No"`], allowBlank: true });
+
+  const notas = wb.addWorksheet("Notas");
+  notas.columns = [{ width: 95 }];
+  const instrucciones = [
+    "Instrucciones para llenar la plantilla",
+    "",
+    "1. Una fila por bloque (período) de la sección.",
+    "2. Sección, Día y ¿Académico? tienen listas desplegables.",
+    "3. Período: texto libre (se convierte a mayúsculas), ej.: 1, 2, 3, HOMEROOM, LUNCH.",
+    "4. Horas en formato HH:MM; la hora de fin debe ser posterior al inicio.",
+    "5. Si el bloque (misma sección, día y período) ya existe, se actualiza con los nuevos datos.",
+    "6. Guarda el archivo y usa 'Cargar desde Excel' en la página de Bloques.",
+    "7. Las filas con errores se reportan al final; las demás se importan igual.",
+  ];
+  instrucciones.forEach((linea, idx) => {
+    const celda = notas.getCell(idx + 1, 1);
+    celda.value = linea;
+    if (idx === 0) {
+      celda.font = { bold: true, size: 13 };
+    }
+  });
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", 'attachment; filename="plantilla_bloques.xlsx"');
+  await wb.xlsx.write(res);
+});
+
 router.get("/bloques/:id", async (req, res) => {
   const item = await prisma.bloqueHorario.findUnique({
     where: { id: parseId(req.params.id) },
@@ -216,6 +306,168 @@ router.patch("/bloques/:id", async (req, res) => {
   }
 });
 
+type FilaBloqueImportada = {
+  seccionId: number;
+  diaSemanaId: number;
+  numeroPeriodo: string;
+  horaInicio: string;
+  horaFin: string;
+  esAcademico: boolean;
+};
+
+router.post("/bloques/importar", async (req, res) => {
+  const parsed = z
+    .object({
+      bloques: z.array(z.unknown()).min(1).max(5000),
+    })
+    .safeParse(req.body);
+  if (!parsed.success)
+    return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+
+  const diasNorm = DIA_NOMBRES.map((d) => normalizaTexto(d));
+  const errores: { fila: number; motivo: string }[] = [];
+  const pendientes: {
+    fila: number;
+    seccion: string;
+    diaNum: number;
+    numeroPeriodo: string;
+    horaInicio: string;
+    horaFin: string;
+    esAcademico: boolean;
+  }[] = [];
+
+  parsed.data.bloques.forEach((row, i) => {
+    const fila = i + 2;
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      errores.push({ fila, motivo: "La fila no es un bloque válido" });
+      return;
+    }
+    const r = row as Record<string, unknown>;
+    const seccion = typeof r.seccion === "string" ? r.seccion.trim() : "";
+    const dia = typeof r.dia === "string" ? r.dia.trim() : "";
+    const numeroPeriodo =
+      typeof r.numeroPeriodo === "string" ? r.numeroPeriodo.trim().toUpperCase() : "";
+
+    if (!seccion) {
+      errores.push({ fila, motivo: "Sección vacía" });
+      return;
+    }
+    const diaIdx = dia ? diasNorm.indexOf(normalizaTexto(dia)) : -1;
+    if (diaIdx === -1) {
+      errores.push({
+        fila,
+        motivo: dia
+          ? `Día no reconocido: "${dia}" (usa Lunes...Viernes)`
+          : "Día vacío (usa Lunes...Viernes)",
+      });
+      return;
+    }
+    if (!numeroPeriodo) {
+      errores.push({ fila, motivo: "Período vacío" });
+      return;
+    }
+    const horaInicio = normalizaHora(r.horaInicio);
+    if (horaInicio === null) {
+      errores.push({ fila, motivo: `Hora inicio inválida: "${String(r.horaInicio)}"` });
+      return;
+    }
+    const horaFin = normalizaHora(r.horaFin);
+    if (horaFin === null) {
+      errores.push({ fila, motivo: `Hora fin inválida: "${String(r.horaFin)}"` });
+      return;
+    }
+    if (horaFin <= horaInicio) {
+      errores.push({ fila, motivo: "La hora de fin debe ser posterior a la de inicio" });
+      return;
+    }
+    pendientes.push({
+      fila,
+      seccion,
+      diaNum: diaIdx + 1,
+      numeroPeriodo,
+      horaInicio,
+      horaFin,
+      esAcademico: parseAcademico(r.esAcademico) ?? true,
+    });
+  });
+
+  const seccionPorNombre = new Map<string, number>();
+  if (pendientes.length > 0) {
+    const secciones = await prisma.seccion.findMany({
+      where: { nombre: { in: [...new Set(pendientes.map((p) => p.seccion))] } },
+      select: { id: true, nombre: true },
+    });
+    for (const s of secciones) seccionPorNombre.set(s.nombre, s.id);
+  }
+  const dias = await prisma.diaSemana.findMany({ select: { id: true, numeroDia: true } });
+  const diaPorNumero = new Map(dias.map((d) => [d.numeroDia, d.id]));
+
+  const validas: FilaBloqueImportada[] = [];
+  for (const p of pendientes) {
+    const seccionId = seccionPorNombre.get(p.seccion);
+    if (seccionId === undefined) {
+      errores.push({ fila: p.fila, motivo: `Sección no encontrada: "${p.seccion}"` });
+      continue;
+    }
+    const diaSemanaId = diaPorNumero.get(p.diaNum);
+    if (diaSemanaId === undefined) {
+      errores.push({
+        fila: p.fila,
+        motivo: `Día no configurado en el sistema: "${DIA_NOMBRES[p.diaNum - 1]}"`,
+      });
+      continue;
+    }
+    validas.push({
+      seccionId,
+      diaSemanaId,
+      numeroPeriodo: p.numeroPeriodo,
+      horaInicio: p.horaInicio,
+      horaFin: p.horaFin,
+      esAcademico: p.esAcademico,
+    });
+  }
+
+  const agrupadas = new Map<string, FilaBloqueImportada>();
+  for (const v of validas) agrupadas.set(`${v.seccionId}_${v.diaSemanaId}_${v.numeroPeriodo}`, v);
+  const filas = [...agrupadas.values()];
+
+  const existentes = await prisma.bloqueHorario.findMany({
+    where: {
+      seccionId: { in: [...new Set(filas.map((f) => f.seccionId))] },
+      diaSemanaId: { in: [...new Set(filas.map((f) => f.diaSemanaId))] },
+    },
+    select: { seccionId: true, diaSemanaId: true, numeroPeriodo: true },
+  });
+  const existentesSet = new Set(
+    existentes.map((e) => `${e.seccionId}_${e.diaSemanaId}_${e.numeroPeriodo}`)
+  );
+
+  try {
+    await prisma.$transaction(
+      filas.map((v) =>
+        prisma.bloqueHorario.upsert({
+          where: {
+            seccionId_diaSemanaId_numeroPeriodo: {
+              seccionId: v.seccionId,
+              diaSemanaId: v.diaSemanaId,
+              numeroPeriodo: v.numeroPeriodo,
+            },
+          },
+          create: v,
+          update: { horaInicio: v.horaInicio, horaFin: v.horaFin, esAcademico: v.esAcademico },
+        })
+      )
+    );
+  } catch (err) {
+    throw mapPrismaError(err);
+  }
+
+  const creados = filas.filter(
+    (v) => !existentesSet.has(`${v.seccionId}_${v.diaSemanaId}_${v.numeroPeriodo}`)
+  ).length;
+  res.json({ creados, actualizados: filas.length - creados, errores });
+});
+
 router.delete("/bloques/:id", async (req, res) => {
   const id = parseId(req.params.id);
   const count = await prisma.horarioAsignado.count({ where: { bloqueHorarioId: id } });
@@ -231,6 +483,7 @@ const profesorSchema = z.object({
   email: z.string().email().optional().nullable(),
   maxHorasSemana: z.number().int().positive().optional().nullable(),
   seccionBaseId: z.number().int().positive(),
+  prefiereGruposConsecutivos: z.boolean().optional(),
 });
 
 router.get("/profesores", async (req, res) => {

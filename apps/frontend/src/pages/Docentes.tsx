@@ -10,9 +10,9 @@ import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
 import type { Profesor, Seccion } from "../lib/types";
 
-type FormState = { nombre: string; email: string; maxHorasSemana: string; seccionBaseId: string };
+type FormState = { nombre: string; email: string; maxHorasSemana: string; seccionBaseId: string; prefiereGruposConsecutivos: boolean };
 
-const EMPTY: FormState = { nombre: "", email: "", maxHorasSemana: "", seccionBaseId: "" };
+const EMPTY: FormState = { nombre: "", email: "", maxHorasSemana: "", seccionBaseId: "", prefiereGruposConsecutivos: false };
 
 export default function Docentes() {
   const qc = useQueryClient();
@@ -39,7 +39,7 @@ export default function Docentes() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["profesores"] });
 
   const create = useMutation({
-    mutationFn: (data: { nombre: string; email?: string; maxHorasSemana?: number }) =>
+    mutationFn: (data: { nombre: string; email?: string; maxHorasSemana?: number; prefiereGruposConsecutivos?: boolean }) =>
       api.post("/profesores", data),
     onSuccess: () => {
       invalidate();
@@ -76,7 +76,7 @@ export default function Docentes() {
 
   function openEdit(p: Profesor) {
     setEditing(p);
-    setForm({ nombre: p.nombre, email: p.email ?? "", maxHorasSemana: p.maxHorasSemana ? String(p.maxHorasSemana) : "", seccionBaseId: String(p.seccionBaseId) });
+    setForm({ nombre: p.nombre, email: p.email ?? "", maxHorasSemana: p.maxHorasSemana ? String(p.maxHorasSemana) : "", seccionBaseId: String(p.seccionBaseId), prefiereGruposConsecutivos: p.prefiereGruposConsecutivos ?? false });
     setFormOpen(true);
   }
 
@@ -92,6 +92,7 @@ export default function Docentes() {
       email: form.email.trim() || undefined,
       maxHorasSemana: form.maxHorasSemana ? Number(form.maxHorasSemana) : undefined,
       seccionBaseId: Number(form.seccionBaseId),
+      prefiereGruposConsecutivos: form.prefiereGruposConsecutivos,
     };
     if (editing) update.mutate({ id: editing.id, data });
     else create.mutate(data);
@@ -181,7 +182,17 @@ export default function Docentes() {
             )}
             {profesores.map((p) => (
               <tr key={p.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">{p.nombre}</td>
+                <td className="px-4 py-3 font-medium text-slate-800">
+                  {p.nombre}
+                  {p.prefiereGruposConsecutivos && (
+                    <span
+                      className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+                      title="Prefiere clases consecutivas entre grupos del mismo grado (misma materia y sección)"
+                    >
+                      Consecutivos
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-slate-600">
                   <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
                     {p.seccionBase?.nombre ?? "-"}
@@ -274,6 +285,20 @@ export default function Docentes() {
             placeholder="30"
             wrapper=""
           />
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={form.prefiereGruposConsecutivos}
+              onChange={(e) => setForm({ ...form, prefiereGruposConsecutivos: e.target.checked })}
+              className="mt-0.5"
+            />
+            <span className="text-sm leading-snug text-slate-700">
+              Prefiere clases consecutivas entre grupos del mismo grado
+              <span className="block text-xs text-slate-500">
+                (misma materia y sección, p. ej. 2A y 2B).
+              </span>
+            </span>
+          </label>
           {(create.error || update.error) && (
             <p className="text-sm text-red-600">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}

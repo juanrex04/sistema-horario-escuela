@@ -25,6 +25,7 @@ export type Profesor = {
   maxHorasSemana: number | null;
   seccionBaseId: number;
   seccionBase?: Seccion;
+  prefiereGruposConsecutivos?: boolean;
   _count?: { cargas: number };
 };
 export type Curso = { id: number; seccionId: number; nombre: string; seccion?: Seccion; _count?: { cargas: number } };
@@ -94,4 +95,5 @@ export type GenerateResult = {
   numAsignaciones: number;
   asignaciones: { cargaAcademicaId: number; bloqueHorarioId: number }[];
   colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
+  numConsecutivos?: number;
 };

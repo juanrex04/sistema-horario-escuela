@@ -16,6 +16,21 @@ def _overlap_times(d1, i1, f1, d2, i2, f2) -> bool:
     return i1 < f2 and i2 < f1
 
 
+def _grado_base(nombre: str) -> str:
+    """Base del nombre de un curso sin la letra(s) de grupo.
+
+    '2A'/'2B' -> '2'; 'Kínder A'/'Kínder B' -> 'Kínder'. Sirve para agrupar
+    grupos paralelos del mismo grado dentro de una misma sección.
+    """
+    stripped = nombre.strip()
+    i = len(stripped)
+    while i > 0 and stripped[i - 1] in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚÜ":
+        i -= 1
+    if i == len(stripped) or i == 0:
+        return stripped
+    return stripped[:i].rstrip()
+
+
 def solve(req: SolveRequest) -> SolveResponse:
     model = cp_model.CpModel()
 
@@ -229,6 +244,57 @@ def solve(req: SolveRequest) -> SolveResponse:
                         if _overlap_times(*t1, *t2):
                             model.Add(v1 + v2 <= 1)
 
+    # 6. (Blando) Preferencia de grupos consecutivos por docente: maximiza que
+    #    las cargas del mismo profesor+materia cuyos cursos comparten sección Y
+    #    grado (misma base de nombre, p. ej. 2A y 2B) queden en bloques vecinos
+    #    del mismo día. No rompe la viabilidad: solo guía la búsqueda.
+    variables_consecutivos: list[cp_model.IntVar] = []
+    prof_ids_flag = {p.id for p in req.profesores if p.prefiere_grupos_consecutivos}
+    if prof_ids_flag:
+        cargas_flag = [c for c in req.cargas if c.profesor_id in prof_ids_flag]
+
+        bloques_orden_por_seccion_dia: dict[tuple[int, int], list[int]] = {}
+        for b_id, b in academic_blocks.items():
+            bloques_orden_por_seccion_dia.setdefault((b.seccion_id, b.dia_semana_id), []).append(
+                (int(b.inicio_min), b_id)
+            )
+        for key in bloques_orden_por_seccion_dia:
+            bloques_orden_por_seccion_dia[key].sort()
+            bloques_orden_por_seccion_dia[key] = [b_id for _, b_id in bloques_orden_por_seccion_dia[key]]
+
+        def _agregar_premio(x1: cp_model.IntVar, x2: cp_model.IntVar) -> None:
+            y = model.NewBoolVar(f"CONSEC_{x1.Name()}_{x2.Name()}")
+            model.Add(y <= x1)
+            model.Add(y <= x2)
+            model.Add(y >= x1 + x2 - 1)
+            variables_consecutivos.append(y)
+
+        for i, c1 in enumerate(cargas_flag):
+            curso1 = curso_por_id[c1.curso_id]
+            base1 = _grado_base(curso1.nombre)
+            for c2 in cargas_flag[i + 1:]:
+                if (
+                    c2.profesor_id != c1.profesor_id
+                    or c2.materia_id != c1.materia_id
+                ):
+                    continue
+                curso2 = curso_por_id[c2.curso_id]
+                if curso2.seccion_id != curso1.seccion_id:
+                    continue
+                if _grado_base(curso2.nombre) != base1:
+                    continue
+                for (sec_id, _dia_id), orden in bloques_orden_por_seccion_dia.items():
+                    if sec_id != curso1.seccion_id:
+                        continue
+                    for u, v in zip(orden, orden[1:]):
+                        if (c1.id, u) in variables and (c2.id, v) in variables:
+                            _agregar_premio(variables[(c1.id, u)], variables[(c2.id, v)])
+                        if (c1.id, v) in variables and (c2.id, u) in variables:
+                            _agregar_premio(variables[(c1.id, v)], variables[(c2.id, u)])
+
+    if variables_consecutivos:
+        model.Maximize(sum(variables_consecutivos))
+
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 30
     status = solver.Solve(model)
@@ -262,6 +328,9 @@ def solve(req: SolveRequest) -> SolveResponse:
             num_asignaciones=len(asignaciones),
             asignaciones=asignaciones,
             colaborativas=colaborativas,
+            num_consecutivos=sum(
+                1 for v in variables_consecutivos if solver.Value(v) == 1
+            ),
         )
 
     return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])

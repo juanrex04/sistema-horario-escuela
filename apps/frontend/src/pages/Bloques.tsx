@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX, CalendarClock } from "lucide-react";
-import { api } from "../lib/api";
+import { Pencil, Plus, Search, Trash2, FilterX, CalendarClock, Download, FileUp } from "lucide-react";
+import { api, getToken, API_URL } from "../lib/api";
 import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
@@ -11,6 +11,8 @@ import TableSkeleton from "../components/TableSkeleton";
 import type { BloqueHorario, DiaSemana, Seccion } from "../lib/types";
 
 type FormState = { seccionId: string; dias: number[]; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico: boolean };
+
+type FilaImportar = { seccion: string; dia: string; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico?: boolean };
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 
@@ -58,6 +60,11 @@ export default function Bloques() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [formOpen, setFormOpen] = useState(false);
   const [toDelete, setToDelete] = useState<BloqueHorario | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [plantillaLoading, setPlantillaLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<{ creados: number; actualizados: number; errores: { fila: number; motivo: string }[] } | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["bloques"] });
@@ -99,6 +106,17 @@ export default function Bloques() {
       setToDelete(null);
       remove.reset();
     },
+  });
+
+  const importar = useMutation({
+    mutationFn: (data: { bloques: FilaImportar[] }) =>
+      api.post<{ creados: number; actualizados: number; errores: { fila: number; motivo: string }[] }>("/bloques/importar", data),
+    onSuccess: (res) => {
+      setImportResult(res);
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["bloques-form"] });
+    },
+    onError: (err) => setImportError(err instanceof Error ? err.message : "Error al importar"),
   });
 
   const diasLunJue = dias.filter((d) => d.numeroDia >= 1 && d.numeroDia <= 4).map((d) => d.id);
@@ -163,6 +181,107 @@ export default function Bloques() {
     return nd ? DIAS[nd - 1] : `Día ${id}`;
   };
 
+  async function descargarPlantilla() {
+    setPlantillaLoading(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_URL}/bloques/plantilla`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let message = `Error ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body.error) message = body.error;
+        } catch {
+          /* noop */
+        }
+        throw new Error(message);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "plantilla_bloques.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "No se pudo descargar la plantilla.");
+    } finally {
+      setPlantillaLoading(false);
+    }
+  }
+
+  function aHhmm(v: unknown): string {
+    if (v instanceof Date) {
+      return `${String(v.getHours()).padStart(2, "0")}:${String(v.getMinutes()).padStart(2, "0")}`;
+    }
+    if (typeof v === "number") {
+      if (!Number.isFinite(v) || v < 0 || v >= 1) return "";
+      const total = Math.round(v * 1440) % 1440;
+      return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    }
+    if (typeof v === "string") {
+      const m = /^(\d{1,2}):(\d{1,2})$/.exec(v.trim());
+      if (!m) return "";
+      const hh = Number(m[1]);
+      const mm = Number(m[2]);
+      if (hh > 23 || mm > 59) return "";
+      return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    }
+    return "";
+  }
+
+  async function procesarArchivo(file: File) {
+    setImportError(null);
+    setImportResult(null);
+    if (file.size > 5 * 1024 * 1024) {
+      setImportError("El archivo supera 5 MB.");
+      return;
+    }
+    const XLSX = await import("xlsx");
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) {
+      setImportError("El archivo no contiene una hoja de cálculo válida.");
+      return;
+    }
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+    if (rows.length === 0 || rows.length > 5000) {
+      setImportError(
+        rows.length === 0
+          ? "La hoja no contiene filas de datos."
+          : `El archivo tiene ${rows.length} filas; el máximo es 5000.`
+      );
+      return;
+    }
+    const bloques: FilaImportar[] = rows
+      .filter((r) => String(r["Sección"] ?? "").trim() !== "")
+      .map((r) => {
+        const academico = String(r["¿Académico?"] ?? "").trim();
+        return {
+          seccion: String(r["Sección"]).trim(),
+          dia: String(r["Día"]).trim(),
+          numeroPeriodo: String(r["Período"]).trim(),
+          horaInicio: aHhmm(r["Hora inicio"]),
+          horaFin: aHhmm(r["Hora fin"]),
+          esAcademico: /^(si|sí|1|true)$/i.test(academico)
+            ? true
+            : /^(no|0|false)$/i.test(academico)
+              ? false
+              : undefined,
+        };
+      });
+    if (bloques.length === 0) {
+      setImportError("Ninguna fila tiene valor en la columna Sección.");
+      return;
+    }
+    importar.mutate({ bloques });
+  }
+
   function clearFilters() {
     setFSeccion("");
     setFDia("");
@@ -212,6 +331,18 @@ export default function Bloques() {
         >
           <Plus className="h-4 w-4" />
           Nuevo bloque
+        </button>
+        <button
+          onClick={() => {
+            setImportOpen(true);
+            setArchivo(null);
+            setImportError(null);
+            setImportResult(null);
+          }}
+          className="flex h-9 items-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+        >
+          <FileUp className="h-4 w-4" />
+          Cargar desde Excel
         </button>
       </div>
 
@@ -491,6 +622,107 @@ export default function Bloques() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={importOpen}
+        title="Cargar bloques desde Excel"
+        onClose={() => {
+          setImportOpen(false);
+          importar.reset();
+        }}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Descarga la plantilla, llénala con los períodos de cada sección (usa los desplegables de
+            Sección, Día y ¿Académico?) y súbela para crear o actualizar los bloques de una sola vez.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={descargarPlantilla}
+              disabled={plantillaLoading}
+              className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              {plantillaLoading ? "Preparando..." : "Descargar plantilla"}
+            </button>
+            <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-600 hover:bg-slate-100">
+              <FileUp className="h-4 w-4" />
+              <span className="max-w-56 truncate">{archivo ? archivo.name : "Seleccionar archivo .xlsx"}</span>
+              <input
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    setArchivo(f);
+                    setImportError(null);
+                    setImportResult(null);
+                    importar.reset();
+                  }
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          {archivo && (
+            <button
+              type="button"
+              onClick={() => procesarArchivo(archivo)}
+              disabled={importar.isPending}
+              className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {importar.isPending ? "Procesando..." : "Procesar cargue"}
+            </button>
+          )}
+          {importar.error && !importError && (
+            <p className="text-sm text-red-600">{importar.error instanceof Error ? importar.error.message : "Error al importar"}</p>
+          )}
+          {importError && <p className="text-sm text-red-600">{importError}</p>}
+          {importResult && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm text-slate-700">
+                Se crearon <span className="font-semibold">{importResult.creados}</span> bloque(s), se
+                actualizaron <span className="font-semibold">{importResult.actualizados}</span> y se
+                reportaron <span className="font-semibold">{importResult.errores.length}</span> error(es).
+              </p>
+              {importResult.errores.length > 0 && (
+                <div className="mt-3 overflow-x-auto rounded-lg border border-red-200 bg-white">
+                  <table className="min-w-full divide-y divide-slate-100 text-sm">
+                    <thead className="bg-red-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium text-red-700">Fila</th>
+                        <th className="px-3 py-2 text-left font-medium text-red-700">Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {importResult.errores.map((e) => (
+                        <tr key={e.fila}>
+                          <td className="px-3 py-2 text-slate-600">{e.fila}</td>
+                          <td className="px-3 py-2 text-slate-700">{e.motivo}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setImportOpen(false);
+                importar.reset();
+              }}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <ConfirmDialog

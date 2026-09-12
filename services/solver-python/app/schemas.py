@@ -31,6 +31,9 @@ class Profesor(BaseModel):
     nombre: str
     seccion_base_id: int = Field(alias="seccionBaseId")
     max_horas_semana: int | None = Field(default=None, alias="maxHorasSemana")
+    prefiere_grupos_consecutivos: bool = Field(
+        default=False, alias="prefiereGruposConsecutivos"
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -110,5 +113,6 @@ class SolveResponse(BaseModel):
     num_asignaciones: int = Field(alias="numAsignaciones")
     asignaciones: list[Asignacion]
     colaborativas: list[ReunionCalculada] = Field(default_factory=list)
+    num_consecutivos: int = Field(default=0, alias="numConsecutivos")
 
     model_config = {"populate_by_name": True}

@@ -206,4 +206,72 @@ assert any(a.bloque_horario_id == 1 for a in result7.asignaciones), (
 )
 print("[7] no adscrito sigue disponible en la reunión de otra sección OK")
 
+# 8. Grupos consecutivos: docente con la preferencia, 2A y 2B (misma materia,
+#    misma sección, mismo grado). Con los 8 bloques llenos, el óptimo alterna
+#    ambos grupos dentro de cada día (3 contigüidades/día x 2 días = 6).
+payload8 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+                         prefiereGruposConsecutivos=True)],
+    cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="2B", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4),
+    ],
+)
+result8 = solve(payload8)
+assert result8.status == "OPTIMAL", result8.status
+assert result8.num_asignaciones == 8, result8.num_asignaciones
+assert result8.num_consecutivos == 6, result8.num_consecutivos
+print(f"[8] grupos consecutivos 2A/2B óptimo ({result8.num_consecutivos}/6) OK")
+
+# 9. La preferencia es blanda: no rompe viabilidad y el óptimo con flag nunca
+#    logra menos contigüidades que la solución base sin flag.
+payload9_sin = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="2B", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+    ],
+)
+payload9_con = payload9_sin.model_copy(
+    update={"profesores": [Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+                                    prefiereGruposConsecutivos=True)]}
+)
+result9_sin = solve(payload9_sin)
+result9_con = solve(payload9_con)
+assert result9_sin.status == "OPTIMAL", result9_sin.status
+assert result9_con.status == "OPTIMAL", result9_con.status
+assert result9_con.num_asignaciones == result9_sin.num_asignaciones == 4
+assert result9_con.num_consecutivos >= result9_sin.num_consecutivos
+assert result9_con.num_consecutivos >= 1, result9_con.num_consecutivos
+print(f"[9] blando sin romper viabilidad ({result9_sin.num_consecutivos}->{result9_con.num_consecutivos}) OK")
+
+# 10. Alcance conservador (mismo grado): 2A y 3A NO se premian entre sí.
+payload10 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+                         prefiereGruposConsecutivos=True)],
+    cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="3A", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4),
+    ],
+)
+result10 = solve(payload10)
+assert result10.status == "OPTIMAL", result10.status
+assert result10.num_consecutivos == 0, result10.num_consecutivos
+print(f"[10] sin premio entre grados distintos ({result10.num_consecutivos}) OK")
+
 print("OK")

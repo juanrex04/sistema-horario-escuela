@@ -49,7 +49,7 @@ async function buildPayload() {
       finMin: toMinutes(b.horaFin),
       esAcademico: b.esAcademico,
     })),
-    profesores: profesores.map(({ id, nombre, maxHorasSemana, seccionBaseId }) => ({ id, nombre, maxHorasSemana, seccionBaseId })),
+    profesores: profesores.map(({ id, nombre, maxHorasSemana, seccionBaseId, prefiereGruposConsecutivos }) => ({ id, nombre, maxHorasSemana, seccionBaseId, prefiereGruposConsecutivos })),
     cursos: cursos.map(({ id, nombre, seccionId }) => ({ id, nombre, seccionId })),
     materias: materias.map(({ id, nombre }) => ({ id, nombre })),
     cargas: cargas.map(({ id, cursoId, materiaId, profesorId, bloquesSemanalesRequeridos }) => ({
@@ -106,6 +106,7 @@ router.post("/generate", async (req, res) => {
     status: string;
     asignaciones: { cargaAcademicaId: number; bloqueHorarioId: number }[];
     colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
+    numConsecutivos?: number;
   };
 
   if (result.status === "INFEASIBLE") {

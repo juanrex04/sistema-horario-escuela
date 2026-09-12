@@ -59,6 +59,7 @@ model Profesor {
   maxHorasSemana Int?
   seccionBase    Seccion  @relation(fields: [seccionBaseId], references: [id], onDelete: Restrict)
   seccionBaseId  Int
+  prefiereGruposConsecutivos Boolean @default(false)
   cargas         CargaAcademica[]
 }
 

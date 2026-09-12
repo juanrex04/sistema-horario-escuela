@@ -1,4 +1,4 @@
-const API_URL = "/api";
+export const API_URL = "/api";
 
 export class ApiError extends Error {
   status: number;
@@ -8,7 +8,7 @@ export class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
+export function getToken(): string | null {
   return localStorage.getItem("st_token");
 }
 
