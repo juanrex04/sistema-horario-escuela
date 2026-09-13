@@ -21,10 +21,10 @@ export type BloqueHorario = {
 export type Profesor = {
   id: number;
   nombre: string;
-  email: string | null;
-  maxHorasSemana: number | null;
   seccionBaseId: number;
   seccionBase?: Seccion;
+  departamentoId: number | null;
+  departamento?: Departamento | null;
   prefiereGruposConsecutivos?: boolean;
   _count?: { cargas: number };
 };

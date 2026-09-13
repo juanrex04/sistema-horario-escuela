@@ -480,8 +480,7 @@ router.delete("/bloques/:id", async (req, res) => {
 /* ---------------- Profesores ---------------- */
 const profesorSchema = z.object({
   nombre: z.string().min(1),
-  email: z.string().email().optional().nullable(),
-  maxHorasSemana: z.number().int().positive().optional().nullable(),
+  departamentoId: z.number().int().positive().optional().nullable(),
   seccionBaseId: z.number().int().positive(),
   prefiereGruposConsecutivos: z.boolean().optional(),
 });
@@ -491,19 +490,19 @@ router.get("/profesores", async (req, res) => {
   const withCargas = req.query.withCargas === "true";
   const tieneCargas = qs.bool(req.query.tieneCargas);
   const seccionBaseId = qs.num(req.query.seccionBaseId);
+  const departamentoId = qs.num(req.query.departamentoId);
   const q = qs.str(req.query.q);
   const where = {
-    ...(q
-      ? { OR: [{ nombre: contains(q) }, { email: contains(q) }] }
-      : {}),
+    ...(q ? { nombre: contains(q) } : {}),
     ...(tieneCargas === undefined ? undefined : tieneCargas ? { cargas: { some: {} } } : { cargas: { none: {} } }),
     ...(seccionBaseId === undefined ? undefined : { seccionBaseId }),
+    ...(departamentoId === undefined ? undefined : { departamentoId }),
   };
   const items = await prisma.profesor.findMany({
     where,
     include: withCargas
-      ? { seccionBase: true, cargas: { include: { curso: true, materia: true } }, _count: { select: { cargas: true } } }
-      : { seccionBase: true, _count: { select: { cargas: true } } },
+      ? { seccionBase: true, departamento: true, cargas: { include: { curso: true, materia: true } }, _count: { select: { cargas: true } } }
+      : { seccionBase: true, departamento: true, _count: { select: { cargas: true } } },
     orderBy: { nombre: "asc" },
     ...(paginado ? { skip, take } : {}),
   });
@@ -515,7 +514,7 @@ router.get("/profesores", async (req, res) => {
 router.get("/profesores/:id", async (req, res) => {
   const item = await prisma.profesor.findUnique({
     where: { id: parseId(req.params.id) },
-    include: { seccionBase: true, cargas: { include: { curso: true, materia: true } }, _count: { select: { cargas: true } } },
+    include: { seccionBase: true, departamento: true, cargas: { include: { curso: true, materia: true } }, _count: { select: { cargas: true } } },
   });
   if (!item) throw new HttpError(404, "Profesor no encontrado.");
   res.json(item);
@@ -763,9 +762,14 @@ router.patch("/departamentos/:id/materias", async (req, res) => {
 
 router.delete("/departamentos/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  const count = await prisma.materia.count({ where: { departamentoId: id } });
-  if (count > 0)
+  const [materias, profesores] = await Promise.all([
+    prisma.materia.count({ where: { departamentoId: id } }),
+    prisma.profesor.count({ where: { departamentoId: id } }),
+  ]);
+  if (materias > 0)
     throw new HttpError(409, "El departamento tiene materias asociadas. Reasigna o elimina esas materias primero.");
+  if (profesores > 0)
+    throw new HttpError(409, "El departamento tiene docentes adscritos. Reasigna o elimina esos docentes primero.");
   await prisma.departamento.delete({ where: { id } });
   res.status(204).end();
 });
@@ -781,13 +785,17 @@ const cargaSchema = z.object({
 const cargaMasivaSchema = z
   .object({
     cursoIds: z.array(z.number().int().positive()).min(1),
-    materiaId: z.number().int().positive(),
+    materiaIds: z.array(z.number().int().positive()).min(1),
     profesorId: z.number().int().positive(),
     bloquesSemanalesRequeridos: z.number().int().positive(),
   })
   .refine((d) => new Set(d.cursoIds).size === d.cursoIds.length, {
     message: "Los cursoIds no deben repetirse.",
     path: ["cursoIds"],
+  })
+  .refine((d) => new Set(d.materiaIds).size === d.materiaIds.length, {
+    message: "Las materiaIds no deben repetirse.",
+    path: ["materiaIds"],
   });
 
 const cargaInclude = {
@@ -854,16 +862,21 @@ router.post("/cargas/masivas", async (req, res) => {
   const parsed = cargaMasivaSchema.safeParse(req.body);
   if (!parsed.success)
     return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
-  const { cursoIds, materiaId, profesorId, bloquesSemanalesRequeridos } = parsed.data;
+  const { cursoIds, materiaIds, profesorId, bloquesSemanalesRequeridos } = parsed.data;
   const yaExistentes = await prisma.cargaAcademica.findMany({
-    where: { materiaId, profesorId, cursoId: { in: cursoIds } },
-    select: { cursoId: true },
+    where: { profesorId, cursoId: { in: cursoIds }, materiaId: { in: materiaIds } },
+    select: { cursoId: true, materiaId: true },
   });
-  const existentesSet = new Set(yaExistentes.map((e) => e.cursoId));
-  const omitidas = cursoIds.filter((id) => existentesSet.has(id));
-  const aCrear = cursoIds.filter((id) => !existentesSet.has(id));
+  const existentesSet = new Set(yaExistentes.map((e) => `${e.cursoId}_${e.materiaId}`));
+  const combinaciones: { cursoId: number; materiaId: number }[] = [];
+  for (const cursoId of cursoIds) {
+    for (const materiaId of materiaIds) {
+      if (!existentesSet.has(`${cursoId}_${materiaId}`)) combinaciones.push({ cursoId, materiaId });
+    }
+  }
+  const omitidas = yaExistentes.map((e) => ({ cursoId: e.cursoId, materiaId: e.materiaId }));
   const creadas = await prisma.$transaction(
-    aCrear.map((cursoId) =>
+    combinaciones.map(({ cursoId, materiaId }) =>
       prisma.cargaAcademica.create({
         data: { cursoId, materiaId, profesorId, bloquesSemanalesRequeridos },
       })

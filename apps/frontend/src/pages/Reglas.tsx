@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Handshake, Dumbbell, Users } from "lucide-react";
+import { Plus, Pencil, Trash2, Handshake, Dumbbell, Users, ChevronDown } from "lucide-react";
 import { api } from "../lib/api";
 import { useCatalogQuery } from "../lib/queries";
 import { TextField, SelectField } from "../components/fields";
@@ -15,6 +15,7 @@ import type {
 } from "../lib/types";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+const DIAS_CORTOS = ["Lun", "Mar", "Mié", "Jue", "Vie"];
 
 type ReunionDraft = { diaSemanaId: number; horaInicio: string; horaFin: string; seccionIds: number[] };
 type DeporteDraft = { seccionId: number; diaSemanaIds: number[]; numeroPeriodo: string };
@@ -70,6 +71,7 @@ export default function Reglas() {
   const [deporteOpen, setDeporteOpen] = useState(false);
   const [deporteIdx, setDeporteIdx] = useState<number | null>(null);
   const [dDraft, setDDraft] = useState<DeporteDraft>({ seccionId: 0, diaSemanaIds: [], numeroPeriodo: "" });
+  const [seccionesAbiertas, setSeccionesAbiertas] = useState<Record<number, boolean>>({});
 
   const toggle = useMutation({
     mutationFn: ({ id, reunionActiva }: { id: number; reunionActiva: boolean }) =>
@@ -136,9 +138,12 @@ export default function Reglas() {
     setReunionOpen(false);
   };
 
-  const openNuevoDeporte = () => {
+  const openNuevoDeporte = () => openNuevoDeporteSeccion(secciones[0]?.id ?? 0);
+
+  const openNuevoDeporteSeccion = (seccionId: number) => {
     setDeporteIdx(null);
-    setDDraft({ seccionId: secciones[0]?.id ?? 0, diaSemanaIds: dias[0]?.id ? [dias[0].id] : [], numeroPeriodo: "" });
+    const periodos = periodosDeSeccion(seccionId);
+    setDDraft({ seccionId, diaSemanaIds: dias[0]?.id ? [dias[0].id] : [], numeroPeriodo: periodos[0] ?? "" });
     setDeporteOpen(true);
   };
 
@@ -162,6 +167,11 @@ export default function Reglas() {
   const nombreDia = (id: number) => {
     const dd = dias.find((d) => d.id === id);
     return dd ? DIAS[dd.numeroDia - 1] : "?";
+  };
+
+  const cortoDia = (id: number) => {
+    const nd = dias.find((d) => d.id === id)?.numeroDia;
+    return nd ? DIAS_CORTOS[nd - 1] : "?";
   };
 
   useEffect(() => {
@@ -254,45 +264,132 @@ export default function Reglas() {
             <Dumbbell className="h-5 w-5 text-emerald-600" />
             <h2 className="font-semibold text-slate-800">Días de deportes</h2>
           </div>
-          <button
-            onClick={openNuevoDeporte}
-            disabled={save.isPending}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" /> Agregar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSeccionesAbiertas(Object.fromEntries(secciones.map((s) => [s.id, true])))}
+              disabled={secciones.length === 0}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Expandir todo
+            </button>
+            <button
+              onClick={() => setSeccionesAbiertas(Object.fromEntries(secciones.map((s) => [s.id, false])))}
+              disabled={secciones.length === 0}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Cerrar todo
+            </button>
+            <button
+              onClick={openNuevoDeporte}
+              disabled={save.isPending}
+              className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" /> Agregar
+            </button>
+          </div>
         </div>
         <div className="divide-y divide-slate-100">
-          {deportes.length === 0 && (
+          {secciones.length === 0 && (
             <p className="px-5 py-6 text-sm text-slate-400">
-              Sin días de deportes configurados. Ese bloque no recibirá clases de la sección seleccionada.
+              Sin secciones registradas. Ese bloque no recibirá clases de la sección seleccionada.
             </p>
           )}
-          {deportes.map((d, i) => (
-            <div key={i} className="flex items-center justify-between gap-4 px-5 py-3">
-              <div>
-                <p className="font-medium text-slate-800">
-                  {secciones.find((s) => s.id === d.seccionId)?.nombre ?? "?"} —{" "}
-                  {d.diaSemanaIds.map(nombreDia).join(", ")}, período {d.numeroPeriodo}
-                </p>
-              </div>
-              <div className="flex gap-1">
-                <button onClick={() => openEditarDeporte(i)} className="rounded p-1 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600">
-                  <Pencil className="h-4 w-4" />
-                </button>
+          {secciones.map((sec) => {
+            const entradas = deportes
+              .map((d, i) => ({ d, i }))
+              .filter((x) => x.d.seccionId === sec.id)
+              .sort((a, b) => a.d.numeroPeriodo.localeCompare(b.d.numeroPeriodo, undefined, { numeric: true }));
+            const abierta = seccionesAbiertas[sec.id] ?? true;
+            return (
+              <div key={sec.id}>
                 <button
-                  onClick={() => {
-                    const drafts = deportes.filter((_, j) => j !== i);
-                    setDeportes(drafts);
-                    guardarDeportes(drafts);
-                  }}
-                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  onClick={() =>
+                    setSeccionesAbiertas((prev) => ({ ...prev, [sec.id]: !(prev[sec.id] ?? true) }))
+                  }
+                  className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-slate-50"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${abierta ? "" : "-rotate-90"}`}
+                    />
+                    <span className="font-medium text-slate-800">{sec.nombre}</span>
+                    {entradas.length > 0 && (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        {entradas.length} franja{entradas.length === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                  {entradas.length > 0 && !abierta && (
+                    <span className="hidden truncate text-xs text-slate-400 md:block">
+                      {entradas
+                        .map(({ d }) => `P${d.numeroPeriodo} · ${d.diaSemanaIds.map(cortoDia).join(", ")}`)
+                        .join(" — ")}
+                    </span>
+                  )}
                 </button>
+                {abierta && (
+                  <div className="border-t border-slate-100">
+                    {entradas.length === 0 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                        <p className="text-sm text-slate-400">Sin días de deportes configurados en esta sección.</p>
+                        <button
+                          onClick={() => openNuevoDeporteSeccion(sec.id)}
+                          disabled={save.isPending}
+                          className="flex items-center gap-1.5 rounded-lg border border-emerald-200 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Agregar en {sec.nombre}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {entradas.map(({ d, i }) => (
+                          <div key={`${d.seccionId}_${d.numeroPeriodo}`} className="flex items-center justify-between gap-4 px-5 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-slate-800">Período {d.numeroPeriodo}</span>
+                              <div className="flex gap-1">
+                                {d.diaSemanaIds.map((id) => (
+                                  <span
+                                    key={id}
+                                    className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700"
+                                  >
+                                    {cortoDia(id)}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex gap-1">
+                              <button onClick={() => openEditarDeporte(i)} className="rounded p-1 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600">
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const drafts = deportes.filter((_, j) => j !== i);
+                                  setDeportes(drafts);
+                                  guardarDeportes(drafts);
+                                }}
+                                className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex justify-end border-t border-slate-100 px-5 py-2">
+                          <button
+                            onClick={() => openNuevoDeporteSeccion(sec.id)}
+                            disabled={save.isPending}
+                            className="flex items-center gap-1.5 rounded-lg border border-emerald-200 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Agregar deporte
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

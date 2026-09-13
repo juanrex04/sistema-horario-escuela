@@ -50,7 +50,7 @@ payload = SolveRequest(
     secciones=[Seccion(id=1, nombre="Test")],
     dias=DIAS,
     bloques=bloques_2dias(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1)],
     materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
     cargas=[
@@ -68,7 +68,7 @@ payload2 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Test")],
     dias=DIAS,
     bloques=bloques_simples(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=3)],
@@ -87,7 +87,7 @@ payload3 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Sec1"), Seccion(id=2, nombre="Sec2")],
     dias=DIAS,
     bloques=bloques_2dias(n_sec=2),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[
@@ -111,8 +111,8 @@ payload4 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(n_sec=2),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1, maxHorasSemana=None),
-        Profesor(id=2, nombre="B", seccionBaseId=2, maxHorasSemana=None),
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=2),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
     materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
@@ -140,7 +140,7 @@ payload5 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Test")],
     dias=DIAS,
     bloques=bloques_simples(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=5)],
@@ -157,7 +157,7 @@ payload6 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Primaria"), Seccion(id=2, nombre="Middle")],
     dias=DIAS,
     bloques=bloques_2dias(n_sec=1) + bloque_middle_unico,
-    profesores=[Profesor(id=1, nombre="Juan", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="Juan", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[
@@ -191,7 +191,7 @@ payload7 = SolveRequest(
     ],
     dias=DIAS,
     bloques=bloque_primaria_unico + bloques_middle,
-    profesores=[Profesor(id=5, nombre="Ana", seccionBaseId=3, maxHorasSemana=None)],
+    profesores=[Profesor(id=5, nombre="Ana", seccionBaseId=3)],
     cursos=[Curso(id=1, nombre="C1", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=5, bloquesSemanalesRequeridos=1)],
@@ -213,7 +213,7 @@ payload8 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Sec1")],
     dias=DIAS,
     bloques=bloques_2dias(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1,
                          prefiereGruposConsecutivos=True)],
     cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="2B", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],
@@ -234,7 +234,7 @@ payload9_sin = SolveRequest(
     secciones=[Seccion(id=1, nombre="Sec1")],
     dias=DIAS,
     bloques=bloques_2dias(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None)],
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
     cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="2B", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],
     cargas=[
@@ -243,7 +243,7 @@ payload9_sin = SolveRequest(
     ],
 )
 payload9_con = payload9_sin.model_copy(
-    update={"profesores": [Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+    update={"profesores": [Profesor(id=1, nombre="P", seccionBaseId=1,
                                     prefiereGruposConsecutivos=True)]}
 )
 result9_sin = solve(payload9_sin)
@@ -260,7 +260,7 @@ payload10 = SolveRequest(
     secciones=[Seccion(id=1, nombre="Sec1")],
     dias=DIAS,
     bloques=bloques_2dias(),
-    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1, maxHorasSemana=None,
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1,
                          prefiereGruposConsecutivos=True)],
     cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="3A", seccionId=1)],
     materias=[Materia(id=1, nombre="M1")],

@@ -49,7 +49,7 @@ async function buildPayload() {
       finMin: toMinutes(b.horaFin),
       esAcademico: b.esAcademico,
     })),
-    profesores: profesores.map(({ id, nombre, maxHorasSemana, seccionBaseId, prefiereGruposConsecutivos }) => ({ id, nombre, maxHorasSemana, seccionBaseId, prefiereGruposConsecutivos })),
+    profesores: profesores.map(({ id, nombre, seccionBaseId, prefiereGruposConsecutivos }) => ({ id, nombre, seccionBaseId, prefiereGruposConsecutivos })),
     cursos: cursos.map(({ id, nombre, seccionId }) => ({ id, nombre, seccionId })),
     materias: materias.map(({ id, nombre }) => ({ id, nombre })),
     cargas: cargas.map(({ id, cursoId, materiaId, profesorId, bloquesSemanalesRequeridos }) => ({

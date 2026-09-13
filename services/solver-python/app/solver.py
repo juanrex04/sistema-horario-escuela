@@ -160,21 +160,7 @@ def solve(req: SolveRequest) -> SolveResponse:
                 if len(vars_conflicto) > 1:
                     model.Add(sum(vars_conflicto) <= 1)
 
-    # 4. Límite de horas semanales por profesor (si está definido)
-    for prof in req.profesores:
-        if not prof.max_horas_semana:
-            continue
-        total_min = []
-        for c in req.cargas:
-            if c.profesor_id != prof.id:
-                continue
-            for b_id in candidatos.get(c.id, []):
-                b = academic_blocks[b_id]
-                total_min.append(variables[(c.id, b_id)] * (b.fin_min - b.inicio_min))
-        if total_min:
-            model.Add(sum(total_min) <= prof.max_horas_semana * 60)
-
-    # 5. Colaborativas de departamento: garantizar un hueco común semanal (cualquier día)
+    # 4. Colaborativas de departamento: garantizar un hueco común semanal (cualquier día)
     #    Candidatos = franjas académicas absolutas de la semana que no estén reservadas
     #    (ni por deportes ni por reuniones de sección), para no solapar actividades fijas.
     profesores_de_departamento: dict[int, list[int]] = {}
@@ -244,7 +230,7 @@ def solve(req: SolveRequest) -> SolveResponse:
                         if _overlap_times(*t1, *t2):
                             model.Add(v1 + v2 <= 1)
 
-    # 6. (Blando) Preferencia de grupos consecutivos por docente: maximiza que
+    # 5. (Blando) Preferencia de grupos consecutivos por docente: maximiza que
     #    las cargas del mismo profesor+materia cuyos cursos comparten sección Y
     #    grado (misma base de nombre, p. ej. 2A y 2B) queden en bloques vecinos
     #    del mismo día. No rompe la viabilidad: solo guía la búsqueda.

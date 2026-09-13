@@ -14,12 +14,13 @@ type FormState = {
   cursoId: string;
   seccionId: string;
   cursoIds: number[];
+  materiaIds: number[];
   materiaId: string;
   profesorId: string;
   bloques: string;
 };
 
-const EMPTY: FormState = { cursoId: "", seccionId: "", cursoIds: [], materiaId: "", profesorId: "", bloques: "" };
+const EMPTY: FormState = { cursoId: "", seccionId: "", cursoIds: [], materiaIds: [], materiaId: "", profesorId: "", bloques: "" };
 
 export default function Cargas() {
   const qc = useQueryClient();
@@ -64,20 +65,26 @@ export default function Cargas() {
   };
 
   const createMasivas = useMutation({
-    mutationFn: (data: { cursoIds: number[]; materiaId: number; profesorId: number; bloquesSemanalesRequeridos: number }) =>
-      api.post<{ creadas: CargaAcademica[]; omitidas: number[] }>("/cargas/masivas", data),
+    mutationFn: (data: {
+      cursoIds: number[];
+      materiaIds: number[];
+      profesorId: number;
+      bloquesSemanalesRequeridos: number;
+    }) =>
+      api.post<{ creadas: CargaAcademica[]; omitidas: { cursoId: number; materiaId: number }[] }>(
+        "/cargas/masivas",
+        data
+      ),
     onSuccess: (data) => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setForm(EMPTY);
-      if (data.omitidas.length > 0) {
-        setBulkAviso(
-          `Se crearon ${data.creadas.length} carga(s) y se omitieron ${data.omitidas.length} curso(s) porque ya tenían la materia/profesor seleccionada.`
-        );
-      } else {
-        setBulkAviso(null);
-      }
+      setBulkAviso(
+        data.omitidas.length > 0
+          ? `Se crearon ${data.creadas.length} carga(s) y se omitieron ${data.omitidas.length} combinación(es) que ya tenían la materia/profesor.`
+          : null
+      );
     },
   });
 
@@ -113,6 +120,7 @@ export default function Cargas() {
       cursoId: String(c.cursoId),
       seccionId: "",
       cursoIds: [],
+      materiaIds: [c.materiaId],
       materiaId: String(c.materiaId),
       profesorId: String(c.profesorId),
       bloques: String(c.bloquesSemanalesRequeridos),
@@ -142,7 +150,7 @@ export default function Cargas() {
     }
     createMasivas.mutate({
       cursoIds: form.cursoIds,
-      materiaId: Number(form.materiaId),
+      materiaIds: form.materiaIds,
       profesorId: Number(form.profesorId),
       bloquesSemanalesRequeridos: Number(form.bloques),
     });
@@ -156,6 +164,13 @@ export default function Cargas() {
     setForm((f) => ({
       ...f,
       cursoIds: f.cursoIds.includes(id) ? f.cursoIds.filter((x) => x !== id) : [...f.cursoIds, id],
+    }));
+  }
+
+  function toggleMateria(id: number) {
+    setForm((f) => ({
+      ...f,
+      materiaIds: f.materiaIds.includes(id) ? f.materiaIds.filter((x) => x !== id) : [...f.materiaIds, id],
     }));
   }
 
@@ -430,18 +445,72 @@ export default function Cargas() {
               )}
             </>
           )}
-          <SelectField
-            label="Materia *"
-            required
-            value={form.materiaId}
-            onChange={(e) => setForm({ ...form, materiaId: e.target.value })}
-          >
-            {materias.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.nombre}
-              </option>
-            ))}
-          </SelectField>
+          {editing ? (
+            <SelectField
+              label="Materia *"
+              required
+              value={form.materiaId}
+              onChange={(e) => setForm({ ...form, materiaId: e.target.value, materiaIds: [Number(e.target.value)] })}
+            >
+              {materias.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nombre}
+                </option>
+              ))}
+            </SelectField>
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Materias * ({form.materiaIds.length} seleccionada{form.materiaIds.length === 1 ? "" : "s"})
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, materiaIds: materias.map((m) => m.id) })}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Todas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, materiaIds: [] })}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Ninguno
+                  </button>
+                </div>
+              </div>
+              {materias.length === 0 ? (
+                <p className="text-sm text-slate-400">No hay materias registradas.</p>
+              ) : (
+                <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                  {materias.map((m) => {
+                    const checked = form.materiaIds.includes(m.id);
+                    return (
+                      <label
+                        key={m.id}
+                        className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          checked
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMateria(m.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        {m.nombre}
+                        {m.departamento && <span className="text-xs text-slate-400">· {m.departamento.nombre}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <SelectField
             label="Profesor *"
             required
@@ -486,7 +555,8 @@ export default function Cargas() {
               disabled={
                 (!editing && (!form.seccionId || form.cursoIds.length === 0)) ||
                 (editing && !form.cursoId) ||
-                !form.materiaId ||
+                (!editing && form.materiaIds.length === 0) ||
+                (editing && !form.materiaId) ||
                 !form.profesorId ||
                 !form.bloques ||
                 createMasivas.isPending ||

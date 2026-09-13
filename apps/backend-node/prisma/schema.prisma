@@ -53,14 +53,14 @@ model BloqueHorario {
 }
 
 model Profesor {
-  id             Int      @id @default(autoincrement())
-  nombre         String
-  email          String?  @unique
-  maxHorasSemana Int?
-  seccionBase    Seccion  @relation(fields: [seccionBaseId], references: [id], onDelete: Restrict)
-  seccionBaseId  Int
+  id                        Int      @id @default(autoincrement())
+  nombre                    String
+  seccionBase               Seccion  @relation(fields: [seccionBaseId], references: [id], onDelete: Restrict)
+  seccionBaseId             Int
+  departamento              Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  departamentoId            Int?
   prefiereGruposConsecutivos Boolean @default(false)
-  cargas         CargaAcademica[]
+  cargas                    CargaAcademica[]
 }
 
 model Curso {
@@ -87,6 +87,7 @@ model Departamento {
   reunionActiva  Boolean               @default(false)
   materias       Materia[]
   colaborativas  ColaborativaGenerada[]
+  profesores     Profesor[]
 }
 
 model ReunionSeccion {

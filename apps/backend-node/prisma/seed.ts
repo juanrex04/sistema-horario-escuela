@@ -180,15 +180,15 @@ async function main() {
   console.log("Creando profesores...");
   const profesores: Record<string, number> = {};
   const listaProfesores = [
-    { nombre: "María López", email: "maria.lopez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones.Primaria },
-    { nombre: "Juan Pérez", email: "juan.perez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones.Primaria },
-    { nombre: "Ana Rodríguez", email: "ana.rodriguez@colegio.local", maxHorasSemana: 28, seccionBaseId: secciones["Middle School"] },
-    { nombre: "Carlos Gómez", email: "carlos.gomez@colegio.local", maxHorasSemana: 30, seccionBaseId: secciones["Middle School"] },
-    { nombre: "Lucía Fernández", email: "lucia.fernandez@colegio.local", maxHorasSemana: 25, seccionBaseId: secciones.Preescolar },
-    { nombre: "Pedro Sánchez", email: "pedro.sanchez@colegio.local", maxHorasSemana: 26, seccionBaseId: secciones.Primaria },
-    { nombre: "Elena Ruiz", email: "elena.ruiz@colegio.local", maxHorasSemana: 25, seccionBaseId: secciones.Preescolar },
-    { nombre: "Jorge Morales", email: "jorge.morales@colegio.local", maxHorasSemana: 28, seccionBaseId: secciones["Middle School"] },
-    { nombre: "Sofía Torres", email: "sofia.torres@colegio.local", maxHorasSemana: 24, seccionBaseId: secciones.Diploma },
+    { nombre: "María López", departamentoId: departamentos["Ciencia"], seccionBaseId: secciones.Primaria },
+    { nombre: "Juan Pérez", departamentoId: departamentos["Matemáticas"], seccionBaseId: secciones.Primaria },
+    { nombre: "Ana Rodríguez", departamentoId: departamentos["Idiomas"], seccionBaseId: secciones["Middle School"] },
+    { nombre: "Carlos Gómez", departamentoId: departamentos["Humanidades"], seccionBaseId: secciones["Middle School"] },
+    { nombre: "Lucía Fernández", departamentoId: departamentos["Ed. Física"], seccionBaseId: secciones.Preescolar },
+    { nombre: "Pedro Sánchez", departamentoId: departamentos["Matemáticas"], seccionBaseId: secciones.Primaria },
+    { nombre: "Elena Ruiz", departamentoId: departamentos["Lenguaje"], seccionBaseId: secciones.Preescolar },
+    { nombre: "Jorge Morales", departamentoId: departamentos["Tecnología"], seccionBaseId: secciones["Middle School"] },
+    { nombre: "Sofía Torres", departamentoId: departamentos["Artes"], seccionBaseId: secciones.Diploma },
   ];
   for (const p of listaProfesores) {
     const prof = await prisma.profesor.create({ data: p });

@@ -30,7 +30,6 @@ class Profesor(BaseModel):
     id: int
     nombre: str
     seccion_base_id: int = Field(alias="seccionBaseId")
-    max_horas_semana: int | None = Field(default=None, alias="maxHorasSemana")
     prefiere_grupos_consecutivos: bool = Field(
         default=False, alias="prefiereGruposConsecutivos"
     )
