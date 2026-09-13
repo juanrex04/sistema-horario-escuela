@@ -28,13 +28,38 @@ const deporteSchema = z.object({
   numeroPeriodo: z.string().min(1),
 });
 
+const materiaMismoBloqueSchema = z
+  .object({
+    materiaAId: z.number().int().positive(),
+    materiaBId: z.number().int().positive(),
+  })
+  .refine((p) => p.materiaAId !== p.materiaBId, {
+    path: ["materiaBId"],
+    message: "Las materias del par deben ser distintas",
+  });
+
 const reglasSchema = z.object({
   reunionesSeccion: z.array(reunionSchema),
   deportes: z.array(deporteSchema),
+  materiasMismoBloque: z.array(materiaMismoBloqueSchema),
 });
 
+function normalizarPares(pares: { materiaAId: number; materiaBId: number }[]) {
+  const vistos = new Set<string>();
+  const unicos: { materiaAId: number; materiaBId: number }[] = [];
+  for (const p of pares) {
+    const [a, b] = p.materiaAId < p.materiaBId ? [p.materiaAId, p.materiaBId] : [p.materiaBId, p.materiaAId];
+    const k = `${a}_${b}`;
+    if (!vistos.has(k)) {
+      vistos.add(k);
+      unicos.push({ materiaAId: a, materiaBId: b });
+    }
+  }
+  return unicos;
+}
+
 async function getSnapshot() {
-  const [reunionesSeccion, deportes] = await Promise.all([
+  const [reunionesSeccion, deportes, materiasMismoBloque] = await Promise.all([
     prisma.reunionSeccion.findMany({
       include: { secciones: { select: { id: true, nombre: true } } },
       orderBy: [{ diaSemanaId: "asc" }, { horaInicio: "asc" }],
@@ -43,8 +68,12 @@ async function getSnapshot() {
       include: { seccion: true, diaSemana: true },
       orderBy: [{ seccionId: "asc" }, { diaSemanaId: "asc" }],
     }),
+    prisma.materiaMismoBloque.findMany({
+      include: { materiaA: { select: { id: true, nombre: true } }, materiaB: { select: { id: true, nombre: true } } },
+      orderBy: [{ materiaAId: "asc" }, { materiaBId: "asc" }],
+    }),
   ]);
-  return { reunionesSeccion, deportes };
+  return { reunionesSeccion, deportes, materiasMismoBloque };
 }
 
 router.get("/reglas", async (_req, res) => {
@@ -57,7 +86,7 @@ router.put("/reglas", async (req, res) => {
     res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
     return;
   }
-  const { reunionesSeccion, deportes } = parsed.data;
+  const { reunionesSeccion, deportes, materiasMismoBloque } = parsed.data;
 
   const [secciones, dias] = await Promise.all([
     prisma.seccion.findMany({ select: { id: true, nombre: true } }),
@@ -87,6 +116,7 @@ router.put("/reglas", async (req, res) => {
     await prisma.$transaction(async (tx) => {
       await tx.reunionSeccion.deleteMany();
       await tx.deporteSeccion.deleteMany();
+      await tx.materiaMismoBloque.deleteMany();
 
       for (const r of reunionesSeccion) {
         await tx.reunionSeccion.create({
@@ -105,6 +135,11 @@ router.put("/reglas", async (req, res) => {
             diaSemanaId: d.diaSemanaId,
             numeroPeriodo: d.numeroPeriodo,
           },
+        });
+      }
+      for (const p of normalizarPares(materiasMismoBloque)) {
+        await tx.materiaMismoBloque.create({
+          data: { materiaAId: p.materiaAId, materiaBId: p.materiaBId },
         });
       }
     });

@@ -74,11 +74,23 @@ model Curso {
 }
 
 model Materia {
-  id             Int           @id @default(autoincrement())
-  nombre         String        @unique
-  departamento   Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  id             Int                   @id @default(autoincrement())
+  nombre         String                @unique
+  departamento   Departamento?         @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
   departamentoId Int?
   cargas         CargaAcademica[]
+  mismoBloqueA   MateriaMismoBloque[]  @relation("MateriaMismoBloqueA")
+  mismoBloqueB   MateriaMismoBloque[]  @relation("MateriaMismoBloqueB")
+}
+
+model MateriaMismoBloque {
+  id         Int    @id @default(autoincrement())
+  materiaAId Int
+  materiaA   Materia @relation("MateriaMismoBloqueA", fields: [materiaAId], references: [id], onDelete: Cascade)
+  materiaBId Int
+  materiaB   Materia @relation("MateriaMismoBloqueB", fields: [materiaBId], references: [id], onDelete: Cascade)
+
+  @@unique([materiaAId, materiaBId])
 }
 
 model Departamento {

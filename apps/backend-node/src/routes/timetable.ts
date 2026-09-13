@@ -13,7 +13,7 @@ function toMinutes(time: string): number {
 }
 
 async function buildPayload() {
-  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos] =
+  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque] =
     await Promise.all([
       prisma.seccion.findMany({ orderBy: { id: "asc" } }),
       prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
@@ -31,6 +31,7 @@ async function buildPayload() {
         where: { reunionActiva: true },
         include: { materias: true },
       }),
+      prisma.materiaMismoBloque.findMany(),
     ]);
 
   const colaborativas = departamentos
@@ -70,19 +71,52 @@ async function buildPayload() {
       diaSemanaId: d.diaSemanaId,
       numeroPeriodo: d.numeroPeriodo,
     })),
+    materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId }) => ({ materiaAId, materiaBId })),
     colaborativas,
   };
 }
 
+function validarParesMismoBloque(
+  pares: { materiaAId: number; materiaBId: number }[],
+  materias: { id: number; nombre: string }[],
+  cursos: { id: number; nombre: string }[],
+  cargas: { id: number; cursoId: number; materiaId: number; bloquesSemanalesRequeridos: number }[]
+) {
+  const nombreMateria = (id: number) => materias.find((m) => m.id === id)?.nombre ?? `materia ${id}`;
+  const nombreCurso = (id: number) => cursos.find((c) => c.id === id)?.nombre ?? `curso ${id}`;
+
+  for (const par of pares) {
+    const cargasA = cargas.filter((c) => c.materiaId === par.materiaAId);
+    const cargasB = cargas.filter((c) => c.materiaId === par.materiaBId);
+    const porCurso = new Map<number, [number, number]>();
+    for (const ca of cargasA) {
+      const cb = cargasB.find((c) => c.cursoId === ca.cursoId);
+      if (cb && ca.bloquesSemanalesRequeridos !== cb.bloquesSemanalesRequeridos) {
+        porCurso.set(ca.cursoId, [ca.bloquesSemanalesRequeridos, cb.bloquesSemanalesRequeridos]);
+      }
+    }
+    for (const [cursoId, [ba, bb]] of porCurso) {
+      const error = `Las materias '${nombreMateria(par.materiaAId)}' y '${nombreMateria(par.materiaBId)}' requieren bloques semanales distintos en el curso '${nombreCurso(cursoId)}' (${ba} vs ${bb}). Deben coincidir para compartir el mismo bloque.`;
+      return error;
+    }
+  }
+  return null;
+}
+
 router.post("/generate", async (req, res) => {
-  const { cargas } = await buildPayload();
-  if (cargas.length === 0) {
+  const payload = await buildPayload();
+  if (payload.cargas.length === 0) {
     res.status(400).json({ error: "No hay cargas académicas para generar el horario" });
     return;
   }
 
+  const errorPares = validarParesMismoBloque(payload.materiasMismoBloque, payload.materias, payload.cursos, payload.cargas);
+  if (errorPares) {
+    res.status(400).json({ error: errorPares });
+    return;
+  }
+
   await prisma.horarioAsignado.deleteMany();
-  const payload = await buildPayload();
 
   let solverResponse: Awaited<ReturnType<typeof fetch>>;
   try {

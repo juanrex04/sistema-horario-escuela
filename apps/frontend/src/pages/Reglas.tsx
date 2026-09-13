@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Handshake, Dumbbell, Users, ChevronDown } from "lucide-react";
+import { Plus, Pencil, Trash2, Handshake, Dumbbell, Users, ChevronDown, Shuffle } from "lucide-react";
 import { api } from "../lib/api";
 import { useCatalogQuery } from "../lib/queries";
 import { TextField, SelectField } from "../components/fields";
@@ -9,6 +9,7 @@ import type {
   ColaborativaGenerada,
   Departamento,
   DiaSemana,
+  Materia,
   Reglas,
   Seccion,
   BloqueHorario,
@@ -20,11 +21,17 @@ const DIAS_CORTOS = ["Lun", "Mar", "Mié", "Jue", "Vie"];
 type ReunionDraft = { diaSemanaId: number; horaInicio: string; horaFin: string; seccionIds: number[] };
 type DeporteDraft = { seccionId: number; diaSemanaIds: number[]; numeroPeriodo: string };
 type DeporteFila = { seccionId: number; diaSemanaId: number; numeroPeriodo: string };
+type ParDraft = { materiaAId: number; materiaBId: number };
+
+function parNormalizado(a: number, b: number) {
+  return a < b ? `${a}_${b}` : `${b}_${a}`;
+}
 
 export default function Reglas() {
   const qc = useQueryClient();
   const [reuniones, setReuniones] = useState<ReunionDraft[]>([]);
   const [deportes, setDeportes] = useState<DeporteDraft[]>([]);
+  const [pares, setPares] = useState<ParDraft[]>([]);
 
   const aplicar = (data: Reglas) => {
     setReuniones(
@@ -44,6 +51,7 @@ export default function Reglas() {
     }
     for (const e of agrupados.values()) e.diaSemanaIds.sort((a, b) => a - b);
     setDeportes(Array.from(agrupados.values()));
+    setPares(data.materiasMismoBloque.map((p) => ({ materiaAId: p.materiaAId, materiaBId: p.materiaBId })));
   };
 
   const { data: reglas, dataUpdatedAt, refetch: refetchReglas } = useQuery({
@@ -54,6 +62,7 @@ export default function Reglas() {
   const { data: dias = [] } = useCatalogQuery<DiaSemana[]>("dias", "/dias");
   const { data: bloques = [] } = useCatalogQuery<BloqueHorario[]>("bloques", "/bloques");
   const { data: departamentos = [] } = useCatalogQuery<Departamento[]>("departamentos", "/departamentos");
+  const { data: materias = [] } = useCatalogQuery<Materia[]>("materias", "/materias");
   const { data: colaborativas = [] } = useQuery({
     queryKey: ["colaborativas"],
     queryFn: () => api.get<ColaborativaGenerada[]>("/timetables/resultado/colaborativas"),
@@ -73,6 +82,10 @@ export default function Reglas() {
   const [dDraft, setDDraft] = useState<DeporteDraft>({ seccionId: 0, diaSemanaIds: [], numeroPeriodo: "" });
   const [seccionesAbiertas, setSeccionesAbiertas] = useState<Record<number, boolean>>({});
 
+  const [parOpen, setParOpen] = useState(false);
+  const [parIdx, setParIdx] = useState<number | null>(null);
+  const [pDraft, setPDraft] = useState<ParDraft>({ materiaAId: 0, materiaBId: 0 });
+
   const toggle = useMutation({
     mutationFn: ({ id, reunionActiva }: { id: number; reunionActiva: boolean }) =>
       api.patch(`/departamentos/${id}`, { reunionActiva }),
@@ -80,8 +93,11 @@ export default function Reglas() {
   });
 
   const save = useMutation({
-    mutationFn: (payload: { reunionesSeccion: ReunionDraft[]; deportes: DeporteFila[] }) =>
-      api.put<Reglas>("/reglas", payload),
+    mutationFn: (payload: {
+      reunionesSeccion: ReunionDraft[];
+      deportes: DeporteFila[];
+      materiasMismoBloque: ParDraft[];
+    }) => api.put<Reglas>("/reglas", payload),
     onSuccess: (data) => {
       qc.setQueryData(["reglas"], data);
       aplicar(data);
@@ -92,9 +108,11 @@ export default function Reglas() {
   });
 
   const guardarReuniones = (r: ReunionDraft[]) =>
-    save.mutate({ reunionesSeccion: r, deportes: expandeDeportes(deportes) });
+    save.mutate({ reunionesSeccion: r, deportes: expandeDeportes(deportes), materiasMismoBloque: pares });
   const guardarDeportes = (d: DeporteDraft[]) =>
-    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(d) });
+    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(d), materiasMismoBloque: pares });
+  const guardarPares = (p: ParDraft[]) =>
+    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(deportes), materiasMismoBloque: p });
 
   const expandeDeportes = (d: DeporteDraft[]): DeporteFila[] =>
     d.flatMap((dep) =>
@@ -164,6 +182,46 @@ export default function Reglas() {
 
   const periodoEditable = periodosDeSeccion(dDraft.seccionId);
 
+  const nombreMateria = (id: number) => materias.find((m) => m.id === id)?.nombre ?? "?";
+
+  const openNuevoPar = () => {
+    setParIdx(null);
+    setPDraft({ materiaAId: materias[0]?.id ?? 0, materiaBId: materias[1]?.id ?? 0 });
+    setParOpen(true);
+  };
+
+  const openEditarPar = (i: number) => {
+    setParIdx(i);
+    setPDraft({ ...pares[i] });
+    setParOpen(true);
+  };
+
+  const guardarPar = () => {
+    if (!pDraft.materiaAId || !pDraft.materiaBId || pDraft.materiaAId === pDraft.materiaBId) return;
+    if (
+      parIdx === null &&
+      pares.some(
+        (p) => parNormalizado(p.materiaAId, p.materiaBId) === parNormalizado(pDraft.materiaAId, pDraft.materiaBId)
+      )
+    )
+      return;
+    const drafts = [...pares];
+    if (parIdx === null) drafts.push(pDraft);
+    else drafts[parIdx] = pDraft;
+    setPares(drafts);
+    guardarPares(drafts);
+    setParOpen(false);
+  };
+
+  const eliminarPar = (i: number) => {
+    const drafts = pares.filter((_, j) => j !== i);
+    setPares(drafts);
+    guardarPares(drafts);
+  };
+
+  const parValido =
+    !!pDraft.materiaAId && !!pDraft.materiaBId && pDraft.materiaAId !== pDraft.materiaBId && !save.isPending;
+
   const nombreDia = (id: number) => {
     const dd = dias.find((d) => d.id === id);
     return dd ? DIAS[dd.numeroDia - 1] : "?";
@@ -189,7 +247,7 @@ export default function Reglas() {
     <div className="space-y-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-800">Reuniones y días de deportes</h1>
+          <h1 className="text-2xl font-semibold text-slate-800">Reuniones, deportes y materias compartidas</h1>
           <p className="text-sm text-slate-500">
             Los cambios se guardan automáticamente. Los bloques reservados se bloquean como restricciones duras al generar el horario.
           </p>
@@ -394,6 +452,49 @@ export default function Reglas() {
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Shuffle className="h-5 w-5 text-teal-600" />
+            <h2 className="font-semibold text-slate-800">Materias en el mismo bloque</h2>
+          </div>
+          <button
+            onClick={openNuevoPar}
+            disabled={save.isPending}
+            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4" /> Agregar
+          </button>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {pares.length === 0 && (
+            <p className="px-5 py-6 text-sm text-slate-400">
+              Sin pares configurados. Las materias de un par se programan en los mismos bloques de cada curso para que los estudiantes elijan a cuál asistir.
+            </p>
+          )}
+          {pares.map((p, i) => (
+            <div key={i} className="flex items-center justify-between gap-4 px-5 py-3">
+              <div>
+                <p className="font-medium text-slate-800">
+                  <span className="text-violet-700">{nombreMateria(p.materiaAId)}</span>
+                  <Shuffle className="mx-1.5 inline h-3.5 w-3.5 text-slate-400" />
+                  <span className="text-teal-700">{nombreMateria(p.materiaBId)}</span>
+                </p>
+                <p className="text-xs text-slate-500">Comparten el mismo bloque en cada curso (los estudiantes eligen).</p>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => openEditarPar(i)} className="rounded p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-600">
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button onClick={() => eliminarPar(i)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
           <Handshake className="h-5 w-5 text-amber-600" />
           <h2 className="font-semibold text-slate-800">Colaborativas de departamento</h2>
@@ -574,6 +675,62 @@ export default function Reglas() {
             <button
               onClick={guardarDeporte}
               disabled={!dDraft.seccionId || dDraft.diaSemanaIds.length === 0 || !dDraft.numeroPeriodo || save.isPending}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              Guardar
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={parOpen}
+        title={parIdx === null ? "Nuevo par de materias" : "Editar par de materias"}
+        onClose={() => setParOpen(false)}
+      >
+        <div className="space-y-4">
+          <SelectField
+            label="Materia A *"
+            value={pDraft.materiaAId}
+            emptyLabel="Selecciona una materia..."
+            onChange={(e) => setPDraft({ ...pDraft, materiaAId: Number(e.target.value) })}
+          >
+            {materias.map((m) => (
+              <option key={m.id} value={m.id} disabled={pDraft.materiaBId === m.id}>
+                {m.nombre}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Materia B *"
+            value={pDraft.materiaBId}
+            emptyLabel="Selecciona una materia..."
+            onChange={(e) => setPDraft({ ...pDraft, materiaBId: Number(e.target.value) })}
+          >
+            {materias.map((m) => (
+              <option key={m.id} value={m.id} disabled={pDraft.materiaAId === m.id}>
+                {m.nombre}
+              </option>
+            ))}
+          </SelectField>
+          <p className="text-xs text-slate-400">
+            En cada curso donde ambas materias estén asignadas, ocuparán exactamente los mismos bloques semanales, de modo que el estudiante elija a cuál asistir.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setParOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancelar
+            </button>
+            <button
+              onClick={guardarPar}
+              disabled={
+                !parValido ||
+                (parIdx === null &&
+                  pares.some(
+                    (p) =>
+                      parNormalizado(p.materiaAId, p.materiaBId) ===
+                      parNormalizado(pDraft.materiaAId, pDraft.materiaBId)
+                  ))
+              }
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               Guardar

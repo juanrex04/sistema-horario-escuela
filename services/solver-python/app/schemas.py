@@ -78,6 +78,13 @@ class ColaborativaEntrada(BaseModel):
     materia_ids: list[int] = Field(alias="materiaIds")
 
 
+class MateriaMismoBloque(BaseModel):
+    materia_a_id: int = Field(alias="materiaAId")
+    materia_b_id: int = Field(alias="materiaBId")
+
+    model_config = {"populate_by_name": True}
+
+
 class SolveRequest(BaseModel):
     secciones: list[Seccion] = []
     dias: list[Dia] = []
@@ -89,6 +96,9 @@ class SolveRequest(BaseModel):
     reuniones_seccion: list[ReunionSeccion] = Field(default_factory=list, alias="reunionesSeccion")
     deportes: list[Deporte] = Field(default_factory=list)
     colaborativas: list[ColaborativaEntrada] = Field(default_factory=list)
+    materias_mismo_bloque: list[MateriaMismoBloque] = Field(
+        default_factory=list, alias="materiasMismoBloque"
+    )
 
 
 class Asignacion(BaseModel):

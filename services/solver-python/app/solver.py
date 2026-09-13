@@ -123,12 +123,61 @@ def solve(req: SolveRequest) -> SolveResponse:
     for carga in req.cargas:
         cargas_por_curso.setdefault(carga.curso_id, []).append(carga.id)
 
-    # 2. Un curso no puede tener dos asignaciones en el mismo bloque de su sección
+    # Pares de materias que comparten bloque (p. ej. Música y Expresión Corporal:
+    # en el mismo bloque el alumno elige a cuál asistir). Normalizados (min, max).
+    pares_mismo_bloque: set[tuple[int, int]] = {
+        tuple(sorted((p.materia_a_id, p.materia_b_id)))
+        for p in req.materias_mismo_bloque
+    }
+
+    # carga_ids que pertenecen a algún par configurado (materias distintas = cargas distintas)
+    cargas_en_par: dict[tuple[int, int], set[int]] = {}
+    cargas_por_materia_en_curso: dict[int, dict[int, list[int]]] = {}
+    for carga in req.cargas:
+        cargas_par_en_curso = cargas_por_materia_en_curso.setdefault(
+            carga.curso_id, {}
+        )
+        cargas_par_en_curso.setdefault(carga.materia_id, []).append(carga.id)
+
+    for (a, b) in pares_mismo_bloque:
+        for curso_id, por_materia in cargas_por_materia_en_curso.items():
+            cargas_a = por_materia.get(a, [])
+            cargas_b = por_materia.get(b, [])
+            if not cargas_a or not cargas_b:
+                continue
+            for ca in cargas_a:
+                for cb in cargas_b:
+                    cargas_en_par.setdefault((ca, cb), set())
+                    cargas_en_par.setdefault((cb, ca), set())
+
+    # 2. Un curso no puede tener dos asignaciones en el mismo bloque de su sección,
+    #    salvo cuando sus cargas forman un par de "mismo bloque" (comparten el bloque
+    #    a propósito). Se usa violencia por pares, equivalente a la suma <= 1.
     for bloque_id in academic_blocks:
         for curso_id, lista_cargas in cargas_por_curso.items():
-            vars_curso = [variables[(c, bloque_id)] for c in lista_cargas if (c, bloque_id) in variables]
-            if len(vars_curso) > 1:
-                model.Add(sum(vars_curso) <= 1)
+            for i, c1 in enumerate(lista_cargas):
+                for c2 in lista_cargas[i + 1:]:
+                    if (c1, c2) in cargas_en_par:
+                        continue
+                    v1 = variables.get((c1, bloque_id))
+                    v2 = variables.get((c2, bloque_id))
+                    if v1 is not None and v2 is not None:
+                        model.Add(v1 + v2 <= 1)
+
+    # 2b. Pares de materias que comparten bloque: por cada curso donde coexistan las
+    #     cargas de ambas materias, ocupan exactamente los mismos bloques.
+    for (a, b) in pares_mismo_bloque:
+        for curso_id, por_materia in cargas_por_materia_en_curso.items():
+            cargas_a = por_materia.get(a, [])
+            cargas_b = por_materia.get(b, [])
+            if not cargas_a or not cargas_b:
+                continue
+            for ca in cargas_a:
+                for cb in cargas_b:
+                    for b_id in candidatos.get(ca, []):
+                        if b_id not in candidatos.get(cb, []):
+                            continue
+                        model.Add(variables[(ca, b_id)] == variables[(cb, b_id)])
 
     # 3. No solapamiento docente (matriz de incompatibilidad temporal)
     cargas_por_profesor: dict[int, list[int]] = {}

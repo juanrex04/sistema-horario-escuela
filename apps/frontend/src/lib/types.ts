@@ -43,6 +43,12 @@ export type Materia = {
   departamento?: Departamento | null;
   _count?: { cargas: number };
 };
+export type ParMateriasMismoBloque = {
+  materiaAId: number;
+  materiaBId: number;
+  materiaA?: { id: number; nombre: string };
+  materiaB?: { id: number; nombre: string };
+};
 export type ReunionSeccion = {
   id: number;
   diaSemanaId: number;
@@ -58,7 +64,11 @@ export type DeporteSeccion = {
   seccion?: Seccion;
   diaSemana?: DiaSemana;
 };
-export type Reglas = { reunionesSeccion: ReunionSeccion[]; deportes: DeporteSeccion[] };
+export type Reglas = {
+  reunionesSeccion: ReunionSeccion[];
+  deportes: DeporteSeccion[];
+  materiasMismoBloque: ParMateriasMismoBloque[];
+};
 export type ColaborativaGenerada = {
   id: number;
   departamentoId: number;

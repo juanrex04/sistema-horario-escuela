@@ -1,7 +1,7 @@
 from app.solver import solve
 from app.schemas import (
     SolveRequest, Seccion, Dia, Bloque, Profesor, Curso, Materia, Carga,
-    ReunionSeccion, Deporte, ColaborativaEntrada,
+    ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque,
 )
 
 DIAS = [
@@ -273,5 +273,58 @@ result10 = solve(payload10)
 assert result10.status == "OPTIMAL", result10.status
 assert result10.num_consecutivos == 0, result10.num_consecutivos
 print(f"[10] sin premio entre grados distintos ({result10.num_consecutivos}) OK")
+
+# 11. Par "mismo bloque" (Música y Expresión Corporal): docentes distintos,
+#     mismo curso. Ambas cargas deben ocupar exactamente los mismos bloques.
+payload11 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_simples(),
+    profesores=[
+        Profesor(id=1, nombre="Músico", seccionBaseId=1),
+        Profesor(id=2, nombre="Corporal", seccionBaseId=1),
+    ],
+    cursos=[Curso(id=1, nombre="3A", seccionId=1)],
+    materias=[
+        Materia(id=1, nombre="Música"),
+        Materia(id=2, nombre="Expresión Corporal"),
+    ],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=1, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    materiasMismoBloque=[MateriaMismoBloque(materiaAId=1, materiaBId=2)],
+)
+result11 = solve(payload11)
+assert result11.status == "OPTIMAL", result11.status
+assert result11.num_asignaciones == 4, result11.num_asignaciones
+bloques_mus = {a.bloque_horario_id for a in result11.asignaciones if a.carga_academica_id == 1}
+bloques_corp = {a.bloque_horario_id for a in result11.asignaciones if a.carga_academica_id == 2}
+assert bloques_mus == bloques_corp, (bloques_mus, bloques_corp)
+print(f"[11] Música/Expresión en el mismo bloque ({sorted(bloques_mus)}) OK")
+
+# 12. Sin pareja configurada, las cargas de materias distintas en el mismo curso
+#     NO pueden compartir bloque (restricción de curso sigue vigente).
+payload12 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_simples(),
+    profesores=[
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=1),
+    ],
+    cursos=[Curso(id=1, nombre="3A", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=1, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+)
+result12 = solve(payload12)
+assert result12.status == "OPTIMAL", result12.status
+bloques_a = {a.bloque_horario_id for a in result12.asignaciones if a.carga_academica_id == 1}
+bloques_b = {a.bloque_horario_id for a in result12.asignaciones if a.carga_academica_id == 2}
+assert bloques_a.isdisjoint(bloques_b), (bloques_a, bloques_b)
+print(f"[12] sin par: bloques disjuntos ({sorted(bloques_a)} vs {sorted(bloques_b)}) OK")
 
 print("OK")
