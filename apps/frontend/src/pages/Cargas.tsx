@@ -58,6 +58,7 @@ export default function Cargas() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [formOpen, setFormOpen] = useState(false);
   const [bulkAviso, setBulkAviso] = useState<string | null>(null);
+  const [mostrarTodasMaterias, setMostrarTodasMaterias] = useState(false);
   const [toDelete, setToDelete] = useState<CargaAcademica | null>(null);
 
   const invalidate = () => {
@@ -110,6 +111,7 @@ export default function Cargas() {
   function openCreate() {
     setEditing(null);
     setForm(EMPTY);
+    setMostrarTodasMaterias(false);
     setBulkAviso(null);
     setFormOpen(true);
   }
@@ -126,6 +128,7 @@ export default function Cargas() {
       bloques: String(c.bloquesSemanalesRequeridos),
     });
     setBulkAviso(null);
+    setMostrarTodasMaterias(false);
     setFormOpen(true);
   }
 
@@ -159,6 +162,17 @@ export default function Cargas() {
   const cursosDeSeccion = form.seccionId
     ? cursos.filter((c) => c.seccionId === Number(form.seccionId)).sort((a, b) => a.nombre.localeCompare(b.nombre))
     : [];
+
+  const profesoresOrdenados = [...profesores].sort(
+    (a, b) => a.seccionBaseId - b.seccionBaseId || a.nombre.localeCompare(b.nombre)
+  );
+
+  const profesorSel = profesores.find((p) => p.id === Number(form.profesorId));
+  const materiasVisible = mostrarTodasMaterias
+    ? materias
+    : profesorSel?.departamentoId
+      ? materias.filter((m) => m.departamentoId === profesorSel.departamentoId)
+      : materias.filter((m) => m.departamentoId == null);
 
   function toggleCurso(id: number) {
     setForm((f) => ({
@@ -357,30 +371,59 @@ export default function Cargas() {
       <Modal
         open={formOpen}
         title={editing ? "Editar carga académica" : "Nueva carga académica"}
+        maxWidth="max-w-2xl"
         onClose={() => {
           setFormOpen(false);
           setEditing(null);
           setForm(EMPTY);
+          setMostrarTodasMaterias(false);
         }}
       >
-        <form onSubmit={submit} className="space-y-4">
-          {editing ? (
-            <SelectField
-              label="Curso *"
-              required
-              value={form.cursoId}
-              onChange={(e) => setForm({ ...form, cursoId: e.target.value })}
-            >
-              {cursos.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.seccion?.nombre} - {c.nombre}
-                </option>
-              ))}
-            </SelectField>
+        <form onSubmit={submit}>
+          <div className="space-y-4 overflow-y-auto pr-1">
+            {editing ? (
+            <>
+              <SelectField
+                label="Profesor *"
+                required
+                value={form.profesorId}
+                onChange={(e) => setForm({ ...form, profesorId: e.target.value })}
+              >
+                {profesoresOrdenados.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre} · {p.seccionBase?.nombre ?? "Sin sección"}
+                  </option>
+                ))}
+              </SelectField>
+              <SelectField
+                label="Materia *"
+                required
+                value={form.materiaId}
+                onChange={(e) => setForm({ ...form, materiaId: e.target.value, materiaIds: [Number(e.target.value)] })}
+              >
+                {materias.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nombre}
+                  </option>
+                ))}
+              </SelectField>
+              <SelectField
+                label="Curso *"
+                required
+                value={form.cursoId}
+                onChange={(e) => setForm({ ...form, cursoId: e.target.value })}
+              >
+                {cursos.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.seccion?.nombre} - {c.nombre}
+                  </option>
+                ))}
+              </SelectField>
+            </>
           ) : (
             <>
               <SelectField
-                label="Sección *"
+                label="1 · Sección *"
                 required
                 value={form.seccionId}
                 onChange={(e) => setForm({ ...form, seccionId: e.target.value, cursoIds: [] })}
@@ -392,10 +435,99 @@ export default function Cargas() {
                 ))}
               </SelectField>
               {form.seccionId && (
+                <SelectField
+                  label="2 · Docente *"
+                  required
+                  value={form.profesorId}
+                  onChange={(e) => setForm({ ...form, profesorId: e.target.value })}
+                >
+                  {profesoresOrdenados.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} · {p.seccionBase?.nombre ?? "Sin sección"}
+                    </option>
+                  ))}
+                </SelectField>
+              )}
+              {form.seccionId && form.profesorId && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      3 · Materias * ({form.materiaIds.length} seleccionada{form.materiaIds.length === 1 ? "" : "s"})
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, materiaIds: materiasVisible.map((m) => m.id) })}
+                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, materiaIds: [] })}
+                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Ninguno
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={mostrarTodasMaterias}
+                        onChange={(e) => setMostrarTodasMaterias(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Mostrar todas las materias
+                    </label>
+                    {!mostrarTodasMaterias && (
+                      <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                        {profesorSel?.departamentoId
+                          ? `Departamento: ${profesorSel.departamento?.nombre ?? "—"}`
+                          : "Materias sin departamento"}
+                      </span>
+                    )}
+                  </div>
+                  {materiasVisible.length === 0 ? (
+                    <p className="text-sm text-slate-400">
+                      {profesorSel?.departamentoId && !mostrarTodasMaterias
+                        ? `El departamento ${profesorSel.departamento?.nombre ?? ""} no tiene materias asignadas.`
+                        : "No hay materias registradas."}
+                    </p>
+                  ) : (
+                    <div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {materiasVisible.map((m) => {
+                        const checked = form.materiaIds.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
+                              checked
+                                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleMateria(m.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            {m.nombre}
+                            {m.departamento && <span className="text-xs text-slate-400">· {m.departamento.nombre}</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {form.seccionId && form.profesorId && form.materiaIds.length > 0 && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Cursos * ({form.cursoIds.length} seleccionado{form.cursoIds.length === 1 ? "" : "s"})
+                      4 · Cursos * ({form.cursoIds.length} seleccionado{form.cursoIds.length === 1 ? "" : "s"})
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -417,7 +549,7 @@ export default function Cargas() {
                   {cursosDeSeccion.length === 0 ? (
                     <p className="text-sm text-slate-400">La sección no tiene cursos.</p>
                   ) : (
-                    <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                    <div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
                       {cursosDeSeccion.map((c) => {
                         const checked = form.cursoIds.includes(c.id);
                         return (
@@ -445,127 +577,56 @@ export default function Cargas() {
               )}
             </>
           )}
-          {editing ? (
-            <SelectField
-              label="Materia *"
-              required
-              value={form.materiaId}
-              onChange={(e) => setForm({ ...form, materiaId: e.target.value, materiaIds: [Number(e.target.value)] })}
-            >
-              {materias.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.nombre}
-                </option>
-              ))}
-            </SelectField>
-          ) : (
-            <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Materias * ({form.materiaIds.length} seleccionada{form.materiaIds.length === 1 ? "" : "s"})
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, materiaIds: materias.map((m) => m.id) })}
-                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Todas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, materiaIds: [] })}
-                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Ninguno
-                  </button>
-                </div>
-              </div>
-              {materias.length === 0 ? (
-                <p className="text-sm text-slate-400">No hay materias registradas.</p>
-              ) : (
-                <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
-                  {materias.map((m) => {
-                    const checked = form.materiaIds.includes(m.id);
-                    return (
-                      <label
-                        key={m.id}
-                        className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
-                          checked
-                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleMateria(m.id)}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        {m.nombre}
-                        {m.departamento && <span className="text-xs text-slate-400">· {m.departamento.nombre}</span>}
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+          </div>
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-4 flex items-end justify-between gap-4 border-t border-slate-200 bg-white px-5 pb-4 pt-3">
+            <div className="w-44 shrink-0">
+              <TextField
+                label="Bloques semanales requeridos *"
+                type="number"
+                min={1}
+                required
+                value={form.bloques}
+                onChange={(e) => setForm({ ...form, bloques: e.target.value })}
+              />
             </div>
-          )}
-          <SelectField
-            label="Profesor *"
-            required
-            value={form.profesorId}
-            onChange={(e) => setForm({ ...form, profesorId: e.target.value })}
-          >
-            {profesores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </SelectField>
-          <TextField
-            label="Bloques semanales requeridos *"
-            type="number"
-            min={1}
-            required
-            value={form.bloques}
-            onChange={(e) => setForm({ ...form, bloques: e.target.value })}
-          />
-          {(createMasivas.error || update.error) && (
-            <p className="text-sm text-red-600">
-              {(createMasivas.error ?? update.error) instanceof Error
-                ? (createMasivas.error ?? update.error)?.message
-                : "Error"}
-            </p>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                setFormOpen(false);
-                setEditing(null);
-                setForm(EMPTY);
-              }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={
-                (!editing && (!form.seccionId || form.cursoIds.length === 0)) ||
-                (editing && !form.cursoId) ||
-                (!editing && form.materiaIds.length === 0) ||
-                (editing && !form.materiaId) ||
-                !form.profesorId ||
-                !form.bloques ||
-                createMasivas.isPending ||
-                update.isPending
-              }
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {createMasivas.isPending || update.isPending ? "Guardando..." : "Guardar"}
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              {(createMasivas.error || update.error) && (
+                <p className="text-right text-sm text-red-600">
+                  {(createMasivas.error ?? update.error) instanceof Error
+                    ? (createMasivas.error ?? update.error)?.message
+                    : "Error"}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormOpen(false);
+                    setEditing(null);
+                    setForm(EMPTY);
+                  }}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    (!editing && (!form.seccionId || form.cursoIds.length === 0)) ||
+                    (editing && !form.cursoId) ||
+                    (!editing && form.materiaIds.length === 0) ||
+                    (editing && !form.materiaId) ||
+                    !form.profesorId ||
+                    !form.bloques ||
+                    createMasivas.isPending ||
+                    update.isPending
+                  }
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {createMasivas.isPending || update.isPending ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </Modal>

@@ -17,7 +17,7 @@ export default function Modal({ open, title, onClose, children, maxWidth = "max-
       onClick={onClose}
     >
       <div
-        className={`w-full ${maxWidth} rounded-2xl bg-white shadow-xl`}
+        className={`w-full ${maxWidth} max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-white shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
