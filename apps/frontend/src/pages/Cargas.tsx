@@ -2,12 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, FilterX, X } from "lucide-react";
 import { api } from "../lib/api";
-import { usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import Pagination from "../components/Pagination";
-import TableSkeleton from "../components/TableSkeleton";
 import type { CargaAcademica, Curso, Materia, Profesor, Seccion } from "../lib/types";
 
 type FormState = {
@@ -32,20 +29,11 @@ export default function Cargas() {
   const [fMin, setFMin] = useState("");
   const [fMax, setFMax] = useState("");
   const [fq, setFq] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
 
-  const { data: pageData, isLoading } = usePaginatedQuery<CargaAcademica>("cargas", "/cargas", {
-    seccionId: fSeccion,
-    cursoId: fCurso,
-    materiaId: fMateria,
-    profesorId: fProfesor,
-    minBloques: fMin,
-    maxBloques: fMax,
-    q: fq,
-  }, page, pageSize);
-  const cargas = pageData?.items ?? [];
-  const total = pageData?.total ?? 0;
+  const { data: cargas = [], isLoading } = useQuery({
+    queryKey: ["cargas"],
+    queryFn: () => api.get<CargaAcademica[]>("/cargas"),
+  });
 
   const { data: secciones = [] } = useQuery({ queryKey: ["secciones"], queryFn: () => api.get<Seccion[]>("/secciones") });
   const { data: cursos = [] } = useQuery({ queryKey: ["cursos"], queryFn: () => api.get<Curso[]>("/cursos") });
@@ -116,6 +104,14 @@ export default function Cargas() {
     setFormOpen(true);
   }
 
+  function openAsignar(curso: Curso) {
+    setEditing(null);
+    setForm({ ...EMPTY, seccionId: String(curso.seccionId), cursoIds: [curso.id] });
+    setMostrarTodasMaterias(false);
+    setBulkAviso(null);
+    setFormOpen(true);
+  }
+
   function openEdit(c: CargaAcademica) {
     setEditing(c);
     setForm({
@@ -174,6 +170,50 @@ export default function Cargas() {
       ? materias.filter((m) => m.departamentoId === profesorSel.departamentoId)
       : materias.filter((m) => m.departamentoId == null);
 
+  const bloqueMatch = (b: number) =>
+    (fMin === "" || b >= Number(fMin)) && (fMax === "" || b <= Number(fMax));
+
+  const cargasFiltradas = cargas.filter(
+    (c) =>
+      (fSeccion === "" || String(c.curso?.seccionId) === fSeccion) &&
+      (fCurso === "" || String(c.cursoId) === fCurso) &&
+      (fMateria === "" || String(c.materiaId) === fMateria) &&
+      (fProfesor === "" || String(c.profesorId) === fProfesor) &&
+      bloqueMatch(c.bloquesSemanalesRequeridos) &&
+      (fq === "" ||
+        (c.curso?.nombre ?? "").toLowerCase().includes(fq.toLowerCase()) ||
+        (c.materia?.nombre ?? "").toLowerCase().includes(fq.toLowerCase()) ||
+        (c.profesor?.nombre ?? "").toLowerCase().includes(fq.toLowerCase()))
+  );
+
+  const gruposPorCurso = Array.from(
+    cargasFiltradas.reduce((map, c) => {
+      const curso = c.curso;
+      if (!curso) return map;
+      const g = map.get(curso.id) ?? { curso, cargas: [] as CargaAcademica[] };
+      g.cargas.push(c);
+      map.set(curso.id, g);
+      return map;
+    }, new Map<number, { curso: Curso; cargas: CargaAcademica[] }>())
+  )
+    .map(([, g]) => ({
+      ...g,
+      nMaterias: new Set(g.cargas.map((c) => c.materiaId)).size,
+      nProfesores: new Set(g.cargas.map((c) => c.profesorId)).size,
+      totalBloques: g.cargas.reduce((s, c) => s + c.bloquesSemanalesRequeridos, 0),
+    }))
+    .sort(
+      (a, b) =>
+        (a.curso.seccion?.nombre ?? "").localeCompare(b.curso.seccion?.nombre ?? "") ||
+        a.curso.nombre.localeCompare(b.curso.nombre)
+    );
+
+  const nDocentes = new Set(cargasFiltradas.map((c) => c.profesorId)).size;
+  const nCursos = gruposPorCurso.length;
+
+  const deptoDelProfesor = (id: number) => profesores.find((p) => p.id === id)?.departamento?.nombre;
+  const deptoDeMateria = (id: number) => materias.find((m) => m.id === id)?.departamento?.nombre;
+
   function toggleCurso(id: number) {
     setForm((f) => ({
       ...f,
@@ -196,7 +236,6 @@ export default function Cargas() {
     setFMin("");
     setFMax("");
     setFq("");
-    setPage(1);
   }
 
   const filtersActive = fSeccion || fCurso || fMateria || fProfesor || fMin || fMax || fq;
@@ -218,7 +257,6 @@ export default function Cargas() {
           onChange={(e) => {
             setFSeccion(e.target.value);
             setFCurso("");
-            setPage(1);
           }}
           wrapper="w-44"
         >
@@ -232,7 +270,7 @@ export default function Cargas() {
           label="Curso"
           emptyLabel="Todos"
           value={fCurso}
-          onChange={(e) => { setFCurso(e.target.value); setPage(1); }}
+          onChange={(e) => { setFCurso(e.target.value); }}
           wrapper="w-44"
         >
           {cursosFiltrados.map((c) => (
@@ -241,14 +279,14 @@ export default function Cargas() {
             </option>
           ))}
         </SelectField>
-        <SelectField label="Materia" emptyLabel="Todas" value={fMateria} onChange={(e) => { setFMateria(e.target.value); setPage(1); }} wrapper="w-40">
+        <SelectField label="Materia" emptyLabel="Todas" value={fMateria} onChange={(e) => { setFMateria(e.target.value); }} wrapper="w-40">
           {materias.map((m) => (
             <option key={m.id} value={m.id}>
               {m.nombre}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Profesor" emptyLabel="Todos" value={fProfesor} onChange={(e) => { setFProfesor(e.target.value); setPage(1); }} wrapper="w-44">
+        <SelectField label="Profesor" emptyLabel="Todos" value={fProfesor} onChange={(e) => { setFProfesor(e.target.value); }} wrapper="w-44">
           {profesores.map((p) => (
             <option key={p.id} value={p.id}>
               {p.nombre}
@@ -260,7 +298,7 @@ export default function Cargas() {
           type="number"
           min={1}
           value={fMin}
-          onChange={(e) => { setFMin(e.target.value); setPage(1); }}
+          onChange={(e) => { setFMin(e.target.value); }}
           wrapper="w-36"
         />
         <TextField
@@ -268,13 +306,13 @@ export default function Cargas() {
           type="number"
           min={1}
           value={fMax}
-          onChange={(e) => { setFMax(e.target.value); setPage(1); }}
+          onChange={(e) => { setFMax(e.target.value); }}
           wrapper="w-36"
         />
         <TextField
           label="Buscar (curso, materia o profesor)"
           value={fq}
-          onChange={(e) => { setFq(e.target.value); setPage(1); }}
+          onChange={(e) => { setFq(e.target.value); }}
           wrapper="min-w-56 flex-1"
         />
         <button
@@ -307,66 +345,104 @@ export default function Cargas() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Curso</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Materia</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Profesor</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Bloques/sem</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {isLoading && <TableSkeleton cols={5} />}
-            {!isLoading && cargas.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                  <Search className="mx-auto mb-2 h-5 w-5" />
-                  Sin resultados para los filtros aplicados.
-                </td>
-              </tr>
-            )}
-            {cargas.map((c) => (
-              <tr key={c.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">
-                  {c.curso?.seccion?.nombre} - {c.curso?.nombre}
-                </td>
-                <td className="px-4 py-3 text-slate-600">{c.materia?.nombre}</td>
-                <td className="px-4 py-3 text-slate-600">{c.profesor?.nombre}</td>
-                <td className="px-4 py-3 text-slate-600">{c.bloquesSemanalesRequeridos}</td>
-                <td className="px-4 py-3 text-right">
-                  <div className="inline-flex gap-1">
-                    <button
-                      onClick={() => openEdit(c)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => openDelete(c)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPage={setPage}
-          onPageSize={(s) => {
-            setPageSize(s);
-            setPage(1);
-          }}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-slate-500">
+          {isLoading
+            ? "Cargando cargas académicas..."
+            : `${cargasFiltradas.length} carga(s) · ${nCursos} curso(s) · ${nDocentes} docente(s)`}
+        </p>
       </div>
+
+      {isLoading ? (
+        <div className="space-y-3">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-28 animate-pulse rounded-xl border border-slate-200 bg-slate-100" />
+          ))}
+        </div>
+      ) : gruposPorCurso.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white py-10 text-center text-slate-400">
+          <Search className="mx-auto mb-2 h-5 w-5" />
+          Sin resultados para los filtros aplicados.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {gruposPorCurso.map((g) => (
+            <div key={g.curso.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div>
+                  <h3 className="font-semibold text-slate-800">
+                    {g.curso.seccion?.nombre} - {g.curso.nombre}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {g.nMaterias} materia(s) · {g.nProfesores} docente(s) · {g.totalBloques} bloques/sem
+                  </p>
+                </div>
+                <button
+                  onClick={() => openAsignar(g.curso)}
+                  className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Asignar
+                </button>
+              </div>
+              <table className="min-w-full divide-y divide-slate-100 text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-2">Materia</th>
+                    <th className="px-4 py-2">Profesor</th>
+                    <th className="px-4 py-2 text-right">Bloques/sem</th>
+                    <th className="px-4 py-2 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {g.cargas
+                    .slice()
+                    .sort((a, b) => (a.materia?.nombre ?? "").localeCompare(b.materia?.nombre ?? ""))
+                    .map((c) => (
+                      <tr key={c.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2.5 text-slate-700">
+                          {c.materia?.nombre}
+                          {deptoDeMateria(c.materiaId) && (
+                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                              {deptoDeMateria(c.materiaId)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600">
+                          {c.profesor?.nombre}
+                          {deptoDelProfesor(c.profesorId) && (
+                            <span className="ml-2 inline-block rounded bg-violet-50 px-1.5 py-0.5 text-[11px] text-violet-600">
+                              {deptoDelProfesor(c.profesorId)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium text-slate-700">
+                          {c.bloquesSemanalesRequeridos}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <div className="inline-flex gap-1">
+                            <button
+                              onClick={() => openEdit(c)}
+                              className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => openDelete(c)}
+                              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
 
       <Modal
         open={formOpen}
