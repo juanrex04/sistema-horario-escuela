@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { config } from "../config.js";
+import { diagnosticarInviabilidad } from "../lib/diagnosticoInviabilidad.js";
 
 const router = Router();
 
@@ -51,10 +52,11 @@ async function buildPayload() {
       finMin: toMinutes(b.horaFin),
       esAcademico: b.esAcademico,
     })),
-    profesores: profesores.map(({ id, nombre, seccionBaseId, prefiereGruposConsecutivos, esTiempoCompleto, jornadaParcial }) => ({
+    profesores: profesores.map(({ id, nombre, seccionBaseId, departamentoId, prefiereGruposConsecutivos, esTiempoCompleto, jornadaParcial }) => ({
       id,
       nombre,
       seccionBaseId,
+      departamentoId,
       prefiereGruposConsecutivos,
       esTiempoCompleto,
       jornada: (jornadaParcial as { diaSemanaId: number; horaFin: string }[] | null ?? []).map((j) => ({
@@ -290,8 +292,6 @@ router.post("/generate", async (req, res) => {
     return;
   }
 
-  await prisma.horarioAsignado.deleteMany();
-
   let solverResponse: Awaited<ReturnType<typeof fetch>>;
   try {
     solverResponse = await fetch(`${config.solverUrl}/solve`, {
@@ -315,10 +315,16 @@ router.post("/generate", async (req, res) => {
     asignaciones: { cargaAcademicaId: number; bloqueHorarioId: number }[];
     colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
     numConsecutivos?: number;
+    numDiasUsados?: number;
   };
 
   if (result.status === "INFEASIBLE") {
-    res.status(422).json({ error: "No se encontró una solución viable con las restricciones actuales" });
+    const diag = diagnosticarInviabilidad(payload, nombreDepto);
+    const error =
+      diag.causas.length > 0
+        ? `No se puede generar el horario: se detectaron ${diag.causas.length} incompatibilidad(es) en los datos.`
+        : "No se encontró una solución viable con las restricciones actuales (las cargas no encajan entre sí).";
+    res.status(422).json({ error, causas: diag.causas, sugerencias: diag.sugerencias });
     return;
   }
 

@@ -42,7 +42,7 @@ const reglasSchema = z.object({
   reunionesSeccion: z.array(reunionSchema),
   deportes: z.array(deporteSchema),
   materiasMismoBloque: z.array(materiaMismoBloqueSchema),
-  bloquesColaborativa: z.number().int().min(1).max(4),
+  bloquesColaborativa: z.number().int().min(1).max(4).optional(),
 });
 
 function normalizarPares(pares: { materiaAId: number; materiaBId: number }[]) {
@@ -146,11 +146,13 @@ router.put("/reglas", async (req, res) => {
           data: { materiaAId: p.materiaAId, materiaBId: p.materiaBId },
         });
       }
-      await tx.configuracion.upsert({
-        where: { clave: BLOQUES_COLABORATIVA_KEY },
-        update: { valor: String(bloquesColaborativa) },
-        create: { clave: BLOQUES_COLABORATIVA_KEY, valor: String(bloquesColaborativa) },
-      });
+      if (bloquesColaborativa !== undefined) {
+        await tx.configuracion.upsert({
+          where: { clave: BLOQUES_COLABORATIVA_KEY },
+          update: { valor: String(bloquesColaborativa) },
+          create: { clave: BLOQUES_COLABORATIVA_KEY, valor: String(bloquesColaborativa) },
+        });
+      }
     });
     res.json(await getSnapshot());
   } catch (err) {

@@ -38,6 +38,14 @@ def _grado_base(nombre: str) -> str:
     return stripped[:i].rstrip()
 
 
+# Pesos del objetivo blando. La preferencia de grupos consecutivos (docentes
+# con la bandera) domina sobre la distribución semanal, pero un emparejamiento
+# repartido en días distintos siempre gana frente a juntarlo todo en un día.
+PESO_CONSECUTIVOS = 100
+PESO_DISTRIBUCION = 10
+PESO_EXCESO = 40
+
+
 def solve(req: SolveRequest) -> SolveResponse:
     model = cp_model.CpModel()
 
@@ -242,14 +250,13 @@ def solve(req: SolveRequest) -> SolveResponse:
     #    de sección) y que queden dentro de la jornada de TODOS los docentes del departamento:
     #    si algún miembro de tiempo parcial no está en el colegio durante la ventana, esta se
     #    descarta (no se programa la reunión en su hora de salida).
+    #    Los miembros de la reunión son los docentes ADSCRITOS al departamento
+    #    (departamentoId del docente). Los docentes sin departamento no participan en
+    #    ninguna colaborativa; los departamentos sin docentes adscritos no agenda reunión.
     profesores_de_departamento: dict[int, list[int]] = {}
     for col in req.colaborativas:
-        if not col.materia_ids:
-            continue
         prof_ids = {
-            c.profesor_id
-            for c in req.cargas
-            if c.materia_id in col.materia_ids
+            p.id for p in req.profesores if p.departamento_id == col.departamento_id
         }
         if prof_ids:
             profesores_de_departamento[col.departamento_id] = sorted(prof_ids)
@@ -397,8 +404,40 @@ def solve(req: SolveRequest) -> SolveResponse:
                         if (c1.id, v) in variables and (c2.id, u) in variables:
                             _agregar_premio(variables[(c1.id, v)], variables[(c2.id, u)])
 
-    if variables_consecutivos:
-        model.Maximize(sum(variables_consecutivos))
+    # 6. (Blando) Distribución semanal: reparte los bloques de cada carga a lo
+    #    largo de la semana. Se premia usar el mayor número de días posible y se
+    #    castiga superar el tope diario (1 bloque/día en materias de 3 o menos
+    #    bloques semanales; 2 bloques/día como máximo en materias de 4 o más).
+    #    No rompe la viabilidad: solo guía la búsqueda.
+    variables_dias: list[cp_model.IntVar] = []
+    variables_exceso: list[cp_model.IntVar] = []
+    for carga in req.cargas:
+        tope_diario = 1 if carga.bloques_semanales_requeridos <= 3 else 2
+        curso = curso_por_id[carga.curso_id]
+        por_dia: dict[int, list[cp_model.IntVar]] = {}
+        for b_id, b in academic_blocks.items():
+            if b.seccion_id != curso.seccion_id:
+                continue
+            var = variables.get((carga.id, b_id))
+            if var is not None:
+                por_dia.setdefault(b.dia_semana_id, []).append(var)
+        for dia_id, vars_dia in por_dia.items():
+            n = model.NewIntVar(0, len(vars_dia), f"CONEO_{carga.id}_{dia_id}")
+            usa = model.NewBoolVar(f"DIA_{carga.id}_{dia_id}")
+            exceso = model.NewBoolVar(f"EXCESO_{carga.id}_{dia_id}")
+            model.Add(n == sum(vars_dia))
+            model.Add(usa <= n)
+            model.Add(n <= len(vars_dia) * usa)
+            model.Add(n >= tope_diario + 1).OnlyEnforceIf(exceso)
+            model.Add(n <= tope_diario).OnlyEnforceIf(exceso.Not())
+            variables_dias.append(usa)
+            variables_exceso.append(exceso)
+
+    model.Maximize(
+        PESO_CONSECUTIVOS * sum(variables_consecutivos)
+        + PESO_DISTRIBUCION * sum(variables_dias)
+        - PESO_EXCESO * sum(variables_exceso)
+    )
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 30
@@ -435,6 +474,9 @@ def solve(req: SolveRequest) -> SolveResponse:
             colaborativas=colaborativas,
             num_consecutivos=sum(
                 1 for v in variables_consecutivos if solver.Value(v) == 1
+            ),
+            num_dias_usados=sum(
+                1 for v in variables_dias if solver.Value(v) == 1
             ),
         )
 

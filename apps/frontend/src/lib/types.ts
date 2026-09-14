@@ -109,4 +109,5 @@ export type GenerateResult = {
   asignaciones: { cargaAcademicaId: number; bloqueHorarioId: number }[];
   colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
   numConsecutivos?: number;
+  numDiasUsados?: number;
 };

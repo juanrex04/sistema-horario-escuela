@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RefreshCw, Trash2 } from "lucide-react";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import type {
   BloqueHorario,
   CargaAcademica,
@@ -30,6 +30,11 @@ export default function Horario() {
   const [fDia, setFDia] = useState("");
   const [fMateria, setFMateria] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [genError, setGenError] = useState<{
+    message: string;
+    causas?: string[];
+    sugerencias?: string[];
+  } | null>(null);
 
   const { data: resultado = [], isLoading } = useQuery({
     queryKey: ["resultado"],
@@ -71,13 +76,28 @@ export default function Horario() {
   const generate = useMutation({
     mutationFn: () => api.post<import("../lib/types").GenerateResult>("/timetables/generate"),
     onSuccess: (data) => {
+      setGenError(null);
       const extra = data.numConsecutivos && data.numConsecutivos > 0
         ? `, ${data.numConsecutivos} clases consecutivas entre grupos del mismo grado`
         : "";
-      setFeedback(`Horario generado: estado ${data.status}, ${data.numAsignaciones} asignaciones${extra}.`);
+      const reparto = data.numDiasUsados && data.numDiasUsados > 0
+        ? `, bloques repartidos en ${data.numDiasUsados} días`
+        : "";
+      setFeedback(`Horario generado: estado ${data.status}, ${data.numAsignaciones} asignaciones${extra}${reparto}.`);
       qc.invalidateQueries({ queryKey: ["resultado"] });
     },
-    onError: (err) => setFeedback(err instanceof Error ? err.message : "Error al generar"),
+    onError: (err) => {
+      setFeedback(null);
+      const message = err instanceof Error ? err.message : "Error al generar";
+      const body = (err instanceof ApiError ? err.data : undefined) as
+        | { causas?: string[]; sugerencias?: string[] }
+        | undefined;
+      setGenError({
+        message,
+        causas: Array.isArray(body?.causas) ? body.causas : undefined,
+        sugerencias: Array.isArray(body?.sugerencias) ? body.sugerencias : undefined,
+      });
+    },
   });
 
   const clear = useMutation({
@@ -110,14 +130,20 @@ export default function Horario() {
       .filter((b) => b.seccionId === seccionId)
       .sort((a, b) => (a.horaInicio < b.horaInicio ? -1 : 1));
     const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values());
-    const cells: Record<string, HorarioAsignado | undefined> = {};
+    const cells: Record<string, HorarioAsignado[]> = {};
     for (const asig of resultado) {
       if (asig.cargaAcademica.curso.id === Number(cursoId)) {
         const nd = numeroDeDiaId(asig.bloqueHorario.diaSemanaId);
-        cells[`${nd}-${asig.bloqueHorario.numeroPeriodo}`] = asig;
+        const key = `${nd}-${asig.bloqueHorario.numeroPeriodo}`;
+        (cells[key] ??= []).push(asig);
       }
     }
-    return { periods, cells: cells as Record<string, HorarioAsignado> };
+    for (const arr of Object.values(cells)) {
+      arr.sort((a, b) =>
+        (a.cargaAcademica.materia?.nombre ?? "").localeCompare(b.cargaAcademica.materia?.nombre ?? "")
+      );
+    }
+    return { periods, cells };
   }, [seccionId, cursoId, bloques, resultado, diasById]);
 
   const pid = Number(profesorId || 0);
@@ -135,16 +161,10 @@ export default function Horario() {
     [profesores, pid]
   );
 
-  const deptosDocente = useMemo(() => {
-    if (!pid) return new Set<number>();
-    const s = new Set<number>();
-    for (const c of cargas) {
-      if (!c.profesor || c.profesor.id !== pid) continue;
-      const m = materias.find((mx) => mx.id === c.materiaId);
-      if (m?.departamentoId) s.add(m.departamentoId);
-    }
-    return s;
-  }, [cargas, materias, pid]);
+  const profDeptoId = useMemo(
+    () => profesores.find((p) => p.id === pid)?.departamentoId ?? null,
+    [profesores, pid]
+  );
 
   const filasProfesor = useMemo(() => {
     if (!pid) return [];
@@ -170,21 +190,24 @@ export default function Horario() {
         if (r.secciones.some((s) => s.id === profSeccionBaseId)) add(r.horaInicio, r.horaFin, "evento");
       }
       for (const col of colaborativas) {
-        if (deptosDocente.has(col.departamentoId)) add(col.horaInicio, col.horaFin, "evento");
+        if (profDeptoId !== null && col.departamentoId === profDeptoId) add(col.horaInicio, col.horaFin, "evento");
       }
     }
     rows.sort((a, b) => toMinutes(a.inicio) - toMinutes(b.inicio) || toMinutes(a.fin) - toMinutes(b.fin));
     return rows;
-  }, [pid, bloques, profSeccionIds, profSeccionBaseId, reglas, colaborativas, deptosDocente, fMateria]);
+  }, [pid, bloques, profSeccionIds, profSeccionBaseId, reglas, colaborativas, profDeptoId, fMateria]);
 
   const profClases = useMemo(() => {
-    const m = new Map<string, HorarioAsignado>();
+    const m = new Map<string, HorarioAsignado[]>();
     if (!pid) return m;
     for (const a of resultado) {
       if (a.cargaAcademica.profesor.id !== pid) continue;
       if (fMateria && a.cargaAcademica.materia.id !== Number(fMateria)) continue;
       const nd = numeroDeDiaId(a.bloqueHorario.diaSemanaId);
-      m.set(`${nd}-${a.bloqueHorario.horaInicio}-${a.bloqueHorario.horaFin}`, a);
+      const key = `${nd}-${a.bloqueHorario.horaInicio}-${a.bloqueHorario.horaFin}`;
+      const arr = m.get(key) ?? [];
+      arr.push(a);
+      m.set(key, arr);
     }
     return m;
   }, [resultado, pid, fMateria, diasById]);
@@ -201,7 +224,8 @@ export default function Horario() {
   const colabEnCelda = (nd: number, inicio: string, fin: string) =>
     colaborativas.find(
       (col) =>
-        deptosDocente.has(col.departamentoId) &&
+        profDeptoId !== null &&
+        col.departamentoId === profDeptoId &&
         numeroDeDiaId(col.diaSemanaId) === nd &&
         toMinutes(inicio) < toMinutes(col.horaFin) &&
         toMinutes(col.horaInicio) < toMinutes(fin)
@@ -244,6 +268,32 @@ export default function Horario() {
       {feedback && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
           {feedback}
+        </div>
+      )}
+
+      {genError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
+          <p className="font-semibold">{genError.message}</p>
+          {genError.causas && genError.causas.length > 0 && (
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {genError.causas.map((c, i) => (
+                <li key={i}>{c}</li>
+              ))}
+            </ul>
+          )}
+          {genError.sugerencias && genError.sugerencias.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+              <p className="font-medium">Sugerencias</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                {genError.sugerencias.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -360,12 +410,32 @@ export default function Horario() {
                       return (
                         <td key={i} className="px-4 py-2">
                           {cell ? (
-                            <div className="rounded-lg bg-indigo-50 px-3 py-2">
-                              <p className="font-semibold text-indigo-800">{cell.cargaAcademica.materia?.nombre}</p>
-                              <p className="text-xs text-indigo-600">{cell.cargaAcademica.profesor?.nombre}</p>
+                            <div className={cell.length > 1 ? "space-y-1" : undefined}>
+                              {cell.map((a) => (
+                                <div
+                                  key={a.id}
+                                  className={
+                                    cell.length > 1
+                                      ? "rounded-lg bg-indigo-50 px-2 py-1 shadow-sm"
+                                      : "rounded-lg bg-indigo-50 px-3 py-2 shadow-sm"
+                                  }
+                                >
+                                  <p className="font-semibold text-indigo-800">
+                                    {a.cargaAcademica.materia?.nombre}
+                                  </p>
+                                  <p className="text-xs text-indigo-600">
+                                    {a.cargaAcademica.profesor?.nombre}
+                                  </p>
+                                </div>
+                              ))}
+                              {cell.length > 1 && (
+                                <p className="text-[10px] font-medium text-indigo-400">
+                                  Eligen los estudiantes
+                                </p>
+                              )}
                             </div>
                           ) : esDeporte ? (
-                            <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                            <div className="rounded-lg bg-emerald-50 px-3 py-2 shadow-sm">
                               <p className="font-semibold text-emerald-800">Día de deportes</p>
                               <p className="text-xs text-emerald-600">Bloque reservado</p>
                             </div>
@@ -423,11 +493,30 @@ export default function Horario() {
                     if (clase) {
                       return (
                         <td key={d} className="px-4 py-2">
-                          <div className="rounded-lg bg-indigo-50 px-3 py-2">
-                            <p className="font-semibold text-indigo-800">{clase.cargaAcademica.curso.nombre}</p>
-                            <p className="text-xs text-indigo-600">
-                              {clase.cargaAcademica.curso.seccion?.nombre} · {clase.cargaAcademica.materia.nombre}
-                            </p>
+                          <div className={clase.length > 1 ? "space-y-1" : undefined}>
+                            {clase.map((a) => (
+                              <div
+                                key={a.id}
+                                className={
+                                  clase.length > 1
+                                    ? "rounded-lg bg-indigo-50 px-2 py-1 shadow-sm"
+                                    : "rounded-lg bg-indigo-50 px-3 py-2 shadow-sm"
+                                }
+                              >
+                                <p className="font-semibold text-indigo-800">
+                                  {a.cargaAcademica.curso.nombre}
+                                </p>
+                                <p className="text-xs text-indigo-600">
+                                  {a.cargaAcademica.curso.seccion?.nombre} ·{" "}
+                                  {a.cargaAcademica.materia.nombre}
+                                </p>
+                              </div>
+                            ))}
+                            {clase.length > 1 && (
+                              <p className="text-[10px] font-medium text-indigo-400">
+                                Eligen los estudiantes
+                              </p>
+                            )}
                           </div>
                         </td>
                       );

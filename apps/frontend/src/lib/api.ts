@@ -2,9 +2,12 @@ export const API_URL = "/api";
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  data?: unknown;
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
+    this.name = "ApiError";
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -28,13 +31,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!res.ok) {
     let message = `Error ${res.status}`;
+    let data: unknown;
     try {
       const body = await res.json();
+      data = body;
       if (body.error) message = body.error;
     } catch {
       /* noop */
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, data);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

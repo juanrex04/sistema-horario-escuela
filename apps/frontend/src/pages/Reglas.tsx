@@ -33,6 +33,13 @@ export default function Reglas() {
   const [deportes, setDeportes] = useState<DeporteDraft[]>([]);
   const [pares, setPares] = useState<ParDraft[]>([]);
   const [bloquesColab, setBloquesColab] = useState(2);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (!savedFlash) return;
+    const t = setTimeout(() => setSavedFlash(false), 2500);
+    return () => clearTimeout(t);
+  }, [savedFlash]);
 
   const aplicar = (data: Reglas) => {
     setBloquesColab(data.bloquesColaborativa ?? 2);
@@ -104,6 +111,7 @@ export default function Reglas() {
     onSuccess: (data) => {
       qc.setQueryData(["reglas"], data);
       aplicar(data);
+      setSavedFlash(true);
     },
     onError: () => {
       void refetchReglas();
@@ -111,11 +119,26 @@ export default function Reglas() {
   });
 
   const guardarReuniones = (r: ReunionDraft[]) =>
-    save.mutate({ reunionesSeccion: r, deportes: expandeDeportes(deportes), materiasMismoBloque: pares });
+    save.mutate({
+      reunionesSeccion: r,
+      deportes: expandeDeportes(deportes),
+      materiasMismoBloque: pares,
+      bloquesColaborativa: bloquesColab,
+    });
   const guardarDeportes = (d: DeporteDraft[]) =>
-    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(d), materiasMismoBloque: pares });
+    save.mutate({
+      reunionesSeccion: reuniones,
+      deportes: expandeDeportes(d),
+      materiasMismoBloque: pares,
+      bloquesColaborativa: bloquesColab,
+    });
   const guardarPares = (p: ParDraft[]) =>
-    save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(deportes), materiasMismoBloque: p });
+    save.mutate({
+      reunionesSeccion: reuniones,
+      deportes: expandeDeportes(deportes),
+      materiasMismoBloque: p,
+      bloquesColaborativa: bloquesColab,
+    });
   const guardarBloques = (n: number) =>
     save.mutate({
       reunionesSeccion: reuniones,
@@ -266,6 +289,12 @@ export default function Reglas() {
           <span className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700">
             <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-600" />
             Guardando...
+          </span>
+        )}
+        {savedFlash && !save.isPending && (
+          <span className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            Guardado ✓
           </span>
         )}
       </header>

@@ -102,7 +102,9 @@ result3 = solve(payload3)
 assert result3.status == "OPTIMAL", result3.status
 for a in result3.asignaciones:
     b = next(x for x in payload3.bloques if x.id == a.bloque_horario_id)
-    assert not (b.inicio_min < 540 and 480 < b.fin_min), "docente ocupado durante la reunión"
+    assert not (
+        b.dia_semana_id == 1 and b.inicio_min < 540 and 480 < b.fin_min
+    ), "docente ocupado durante la reunión"
 print("[3] reunión de sección compartida OK")
 
 # 4. Colaborativa de departamento: garantiza hueco común y lo reporta
@@ -111,8 +113,8 @@ payload4 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(n_sec=2),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1),
-        Profesor(id=2, nombre="B", seccionBaseId=2),
+        Profesor(id=1, nombre="A", seccionBaseId=1, departamentoId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=2, departamentoId=1),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
     materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
@@ -385,8 +387,8 @@ payload15 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1),
-        Profesor(id=2, nombre="B", seccionBaseId=1),
+        Profesor(id=1, nombre="A", seccionBaseId=1, departamentoId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=1, departamentoId=1),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
     materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
@@ -416,8 +418,8 @@ payload16 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(n_sec=2),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1),
-        Profesor(id=2, nombre="B", seccionBaseId=2),
+        Profesor(id=1, nombre="A", seccionBaseId=1, departamentoId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=2, departamentoId=1),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
     materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
@@ -442,8 +444,8 @@ payload17 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1),
-        Profesor(id=2, nombre="Parcial", seccionBaseId=1,
+        Profesor(id=1, nombre="A", seccionBaseId=1, departamentoId=1),
+        Profesor(id=2, nombre="Parcial", seccionBaseId=1, departamentoId=1,
                  esTiempoCompleto=False, jornada=[JornadaDia(diaSemanaId=1, hora_fin=600)]),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
@@ -469,8 +471,8 @@ payload18 = SolveRequest(
     dias=DIAS,
     bloques=bloques_simples(),
     profesores=[
-        Profesor(id=1, nombre="A", seccionBaseId=1),
-        Profesor(id=2, nombre="Parcial", seccionBaseId=1,
+        Profesor(id=1, nombre="A", seccionBaseId=1, departamentoId=1),
+        Profesor(id=2, nombre="Parcial", seccionBaseId=1, departamentoId=1,
                  esTiempoCompleto=False, jornada=[JornadaDia(diaSemanaId=1, hora_fin=480)]),
     ],
     cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
@@ -495,5 +497,112 @@ prof_payload = Profesor.model_validate({
 })
 assert prof_payload.jornada[0].hora_fin == 600
 print("[19] jornada parseada por alias desde el payload OK")
+
+# 20. Distribución semanal: una materia de 4 bloques semanales debe repartirse en
+#     los 2 días disponibles (no todos en el día 1), aunque el profe NO tenga la
+#     preferencia de grupos consecutivos.
+payload20 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4)],
+)
+result20 = solve(payload20)
+assert result20.status == "OPTIMAL", result20.status
+assert result20.num_asignaciones == 4, result20.num_asignaciones
+dias20 = {
+    next(x for x in payload20.bloques if x.id == a.bloque_horario_id).dia_semana_id
+    for a in result20.asignaciones
+}
+assert dias20 == {1, 2}, f"debe repartirse entre ambos días, no agolparse en uno: {dias20}"
+assert result20.num_dias_usados == 2, result20.num_dias_usados
+print(f"[20] distribución semanal (días usados: {sorted(dias20)}) OK")
+
+# 21. Grupos consecutivos + distribución a lo largo de la semana (caso Ricardo):
+#     2A y 2B (2 bloques c/u) con la preferencia. El óptimo empareja 2A/2B en
+#     bloques vecinos Y reparte los pares en los 2 días (no todo el mismo día).
+payload21 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1,
+                         prefiereGruposConsecutivos=True)],
+    cursos=[Curso(id=1, nombre="2A", seccionId=1), Curso(id=2, nombre="2B", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+    ],
+)
+result21 = solve(payload21)
+assert result21.status == "OPTIMAL", result21.status
+assert result21.num_consecutivos == 2, result21.num_consecutivos
+dias_por_carga21: dict[int, set[int]] = {}
+for a in result21.asignaciones:
+    b = next(x for x in payload21.bloques if x.id == a.bloque_horario_id)
+    dias_por_carga21.setdefault(a.carga_academica_id, set()).add(b.dia_semana_id)
+assert dias_por_carga21.get(1) == {1, 2}, dias_por_carga21
+assert dias_por_carga21.get(2) == {1, 2}, dias_por_carga21
+assert result21.num_dias_usados == 4, result21.num_dias_usados
+print(f"[21] consecutivos + reparto semanal (pares: {result21.num_consecutivos}) OK")
+
+# 22. Materias de 3 bloques semanales deben quedar en días DISTINTOS (máx. 1
+#     bloque por día). Fixture de 3 días x 4 bloques con tope diario 1.
+bloques_3dias = []
+_i = 1
+for d in (1, 2, 3):
+    for p, ini, fin in ((1, 420, 480), (2, 480, 540), (3, 540, 600), (4, 600, 660)):
+        bloques_3dias.append(Bloque(id=_i, seccionId=1, diaSemanaId=d, numeroPeriodo=str(p),
+                                    inicioMin=ini, finMin=fin, esAcademico=True))
+        _i += 1
+payload22 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS + [Dia(id=3, numeroDia=3, esHorarioEspecial=False)],
+    bloques=bloques_3dias,
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=3)],
+)
+result22 = solve(payload22)
+assert result22.status == "OPTIMAL", result22.status
+assert result22.num_asignaciones == 3, result22.num_asignaciones
+dias22 = [
+    next(x for x in payload22.bloques if x.id == a.bloque_horario_id).dia_semana_id
+    for a in result22.asignaciones
+]
+assert len(dias22) == len(set(dias22)) == 3, f"3 bloques deben quedar en 3 días distintos: {dias22}"
+assert result22.num_dias_usados == 3, result22.num_dias_usados
+print(f"[22] materia de 3 bloques repartida en días distintos ({sorted(set(dias22))}) OK")
+
+# 23. Membresía de la colaborativa por ADSCRIPCIÓN del docente (no por las materias
+#     que dicta): P1 (depto 1) dicta materias del depto 1 y del depto 2. El depto 2
+#     no tiene docentes adscritos -> su reunión se omite; solo se agenda la del depto 1.
+payload23 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[
+        Profesor(id=1, nombre="P1", seccionBaseId=1, departamentoId=1),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=3),
+        Carga(id=2, cursoId=1, materiaId=2, profesorId=1, bloquesSemanalesRequeridos=3),
+    ],
+    colaborativas=[
+        ColaborativaEntrada(departamentoId=1, materiaIds=[1]),
+        ColaborativaEntrada(departamentoId=2, materiaIds=[2]),
+    ],
+)
+result23 = solve(payload23)
+assert result23.status == "OPTIMAL", result23.status
+deptos23 = {c.departamento_id for c in result23.colaborativas}
+assert deptos23 == {1}, f"solo el depto ADSCRITO del docente agenda reunión, no el de las materias que dicta: {deptos23}"
+print(f"[23] colaborativa por adscripción del docente (deptos agendados: {sorted(deptos23)}) OK")
 
 print("OK")
