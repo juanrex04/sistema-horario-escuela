@@ -26,6 +26,13 @@ class Bloque(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class JornadaDia(BaseModel):
+    dia_semana_id: int = Field(alias="diaSemanaId")
+    hora_fin: int = Field(alias="horaFin")
+
+    model_config = {"populate_by_name": True}
+
+
 class Profesor(BaseModel):
     id: int
     nombre: str
@@ -33,6 +40,8 @@ class Profesor(BaseModel):
     prefiere_grupos_consecutivos: bool = Field(
         default=False, alias="prefiereGruposConsecutivos"
     )
+    es_tiempo_completo: bool = Field(default=True, alias="esTiempoCompleto")
+    jornada: list[JornadaDia] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 
@@ -99,6 +108,7 @@ class SolveRequest(BaseModel):
     materias_mismo_bloque: list[MateriaMismoBloque] = Field(
         default_factory=list, alias="materiasMismoBloque"
     )
+    bloques_colaborativa: int = Field(default=2, alias="bloquesColaborativa")
 
 
 class Asignacion(BaseModel):

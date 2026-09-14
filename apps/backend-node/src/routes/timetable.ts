@@ -13,7 +13,7 @@ function toMinutes(time: string): number {
 }
 
 async function buildPayload() {
-  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque] =
+  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque, config] =
     await Promise.all([
       prisma.seccion.findMany({ orderBy: { id: "asc" } }),
       prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
@@ -32,6 +32,7 @@ async function buildPayload() {
         include: { materias: true },
       }),
       prisma.materiaMismoBloque.findMany(),
+      prisma.configuracion.findUnique({ where: { clave: "bloquesColaborativa" } }),
     ]);
 
   const colaborativas = departamentos
@@ -50,7 +51,17 @@ async function buildPayload() {
       finMin: toMinutes(b.horaFin),
       esAcademico: b.esAcademico,
     })),
-    profesores: profesores.map(({ id, nombre, seccionBaseId, prefiereGruposConsecutivos }) => ({ id, nombre, seccionBaseId, prefiereGruposConsecutivos })),
+    profesores: profesores.map(({ id, nombre, seccionBaseId, prefiereGruposConsecutivos, esTiempoCompleto, jornadaParcial }) => ({
+      id,
+      nombre,
+      seccionBaseId,
+      prefiereGruposConsecutivos,
+      esTiempoCompleto,
+      jornada: (jornadaParcial as { diaSemanaId: number; horaFin: string }[] | null ?? []).map((j) => ({
+        diaSemanaId: j.diaSemanaId,
+        horaFin: toMinutes(j.horaFin),
+      })),
+    })),
     cursos: cursos.map(({ id, nombre, seccionId }) => ({ id, nombre, seccionId })),
     materias: materias.map(({ id, nombre }) => ({ id, nombre })),
     cargas: cargas.map(({ id, cursoId, materiaId, profesorId, bloquesSemanalesRequeridos }) => ({
@@ -73,6 +84,7 @@ async function buildPayload() {
     })),
     materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId }) => ({ materiaAId, materiaBId })),
     colaborativas,
+    bloquesColaborativa: Number(config?.valor) || 2,
   };
 }
 
@@ -103,6 +115,136 @@ function validarParesMismoBloque(
   return null;
 }
 
+const DIAS_NOMBRE = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+function solapaReunion(
+  bloque: { diaSemanaId: number; inicioMin: number; finMin: number },
+  r: { diaSemanaId: number; horaInicio: number; horaFin: number }
+): boolean {
+  return bloque.diaSemanaId === r.diaSemanaId && bloque.inicioMin < r.horaFin && r.horaInicio < bloque.finMin;
+}
+
+function validarDisponibilidadProfesor(
+  profesores: { id: number; nombre: string; esTiempoCompleto: boolean; jornada: { diaSemanaId: number; horaFin: number }[] }[],
+  dias: { id: number; numeroDia: number }[],
+  cursos: { id: number; seccionId: number; nombre: string }[],
+  materias: { id: number; nombre: string }[],
+  cargas: { id: number; cursoId: number; materiaId: number; profesorId: number; bloquesSemanalesRequeridos: number }[],
+  bloques: { id: number; seccionId: number; diaSemanaId: number; numeroPeriodo: string; inicioMin: number; finMin: number; esAcademico: boolean }[],
+  deportes: { seccionId: number; diaSemanaId: number; numeroPeriodo: string }[],
+  reuniones: { diaSemanaId: number; horaInicio: number; horaFin: number; seccionIds: number[] }[]
+): string | null {
+  const nombreMateria = (id: number) => materias.find((m) => m.id === id)?.nombre ?? `materia ${id}`;
+  const nombreCurso = (id: number) => cursos.find((c) => c.id === id)?.nombre ?? `curso ${id}`;
+  const nombreDia = (id: number) => {
+    const nd = dias.find((d) => d.id === id)?.numeroDia;
+    return nd ? DIAS_NOMBRE[nd - 1] ?? `día ${nd}` : `día ${id}`;
+  };
+
+  for (const prof of profesores) {
+    if (prof.esTiempoCompleto || prof.jornada.length === 0) continue;
+    const finPorDia = new Map(prof.jornada.map((j) => [j.diaSemanaId, j.horaFin]));
+    const jornadaDesc = prof.jornada
+      .map((j) => `${nombreDia(j.diaSemanaId)} hasta ${minutesToHhmm(j.horaFin)}`)
+      .join(", ");
+
+    for (const carga of cargas) {
+      if (carga.profesorId !== prof.id) continue;
+      const curso = cursos.find((c) => c.id === carga.cursoId);
+      if (!curso) continue;
+      const disponibles = bloques.filter((b) => {
+        if (!b.esAcademico) return false;
+        if (b.seccionId !== curso.seccionId) return false;
+        const fin = finPorDia.get(b.diaSemanaId);
+        if (fin === undefined || b.finMin > fin) return false;
+        if (deportes.some((d) => d.seccionId === b.seccionId && d.diaSemanaId === b.diaSemanaId && d.numeroPeriodo === b.numeroPeriodo)) return false;
+        if (reuniones.some((r) => r.seccionIds.includes(b.seccionId) && solapaReunion(b, r))) return false;
+        return true;
+      });
+
+      if (disponibles.length < carga.bloquesSemanalesRequeridos) {
+        return `El docente '${prof.nombre}' solo dispone de ${disponibles.length} de los ${carga.bloquesSemanalesRequeridos} bloques necesarios para '${nombreMateria(carga.materiaId)}' en '${nombreCurso(curso.id)}' con su jornada parcial (${jornadaDesc}).`;
+      }
+    }
+  }
+  return null;
+}
+
+function validarColaborativas(
+  colaborativas: { departamentoId: number; materiaIds: number[] }[],
+  nombreDepto: Map<number, string>,
+  dias: { id: number; numeroDia: number }[],
+  bloques: { id: number; seccionId: number; diaSemanaId: number; numeroPeriodo: string; inicioMin: number; finMin: number; esAcademico: boolean }[],
+  deportes: { seccionId: number; diaSemanaId: number; numeroPeriodo: string }[],
+  reuniones: { diaSemanaId: number; horaInicio: number; horaFin: number }[],
+  bloquesColaborativa: number
+): string | null {
+  const nombreDia = (id: number) => {
+    const nd = dias.find((d) => d.id === id)?.numeroDia;
+    return nd ? DIAS_NOMBRE[nd - 1] ?? `día ${nd}` : `día ${id}`;
+  };
+
+  const reservados: { diaSemanaId: number; inicioMin: number; finMin: number }[] = [];
+  for (const r of reuniones) reservados.push({ diaSemanaId: r.diaSemanaId, inicioMin: r.horaInicio, finMin: r.horaFin });
+  for (const dep of deportes) {
+    const b = bloques.find(
+      (x) =>
+        x.esAcademico &&
+        x.seccionId === dep.seccionId &&
+        x.diaSemanaId === dep.diaSemanaId &&
+        x.numeroPeriodo === dep.numeroPeriodo
+    );
+    if (b) reservados.push({ diaSemanaId: b.diaSemanaId, inicioMin: b.inicioMin, finMin: b.finMin });
+  }
+
+  const solapa = (
+    a: { diaSemanaId: number; inicioMin: number; finMin: number },
+    b: { diaSemanaId: number; inicioMin: number; finMin: number }
+  ) => a.diaSemanaId === b.diaSemanaId && a.inicioMin < b.finMin && b.inicioMin < a.finMin;
+
+  const vistos = new Set<string>();
+  const libres: { diaSemanaId: number; inicioMin: number; finMin: number }[] = [];
+  for (const b of bloques) {
+    if (!b.esAcademico) continue;
+    const k = `${b.diaSemanaId}_${b.inicioMin}_${b.finMin}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    if (reservados.some((r) => solapa(b, r))) continue;
+    libres.push({ diaSemanaId: b.diaSemanaId, inicioMin: b.inicioMin, finMin: b.finMin });
+  }
+
+  const n = Math.max(1, bloquesColaborativa);
+  const tieneVentana = (dia: number): boolean => {
+    const delDia = libres
+      .filter((i) => i.diaSemanaId === dia)
+      .sort((a, b) => a.inicioMin - b.inicioMin);
+    for (let i = 0; i < delDia.length; i++) {
+      let fin = delDia[i].finMin;
+      let pasos = 1;
+      while (pasos < n) {
+        const sig = delDia.find((x) => x.inicioMin === fin);
+        if (!sig) break;
+        fin = sig.finMin;
+        pasos++;
+      }
+      if (pasos === n) return true;
+    }
+    return false;
+  };
+
+  if (!libres.some((i) => tieneVentana(i.diaSemanaId))) {
+    const conVentana = new Set<number>();
+    for (const it of libres) if (tieneVentana(it.diaSemanaId)) conVentana.add(it.diaSemanaId);
+    const diasSin = dias.filter((d) => !conVentana.has(d.id)).map((d) => nombreDia(d.id));
+    const detalle = diasSin.length ? ` (ni ${diasSin.join(", ")})` : "";
+    for (const col of colaborativas) {
+      const nombre = nombreDepto.get(col.departamentoId) ?? `departamento ${col.departamentoId}`;
+      return `El departamento '${nombre}' no tiene ${n} bloques académicos consecutivos libres en ningún día${detalle} para su reunión colaborativa. Libera franjas ocupadas (deportes o reuniones de sección) o reduce la cantidad de bloques.`;
+    }
+  }
+  return null;
+}
+
 router.post("/generate", async (req, res) => {
   const payload = await buildPayload();
   if (payload.cargas.length === 0) {
@@ -113,6 +255,38 @@ router.post("/generate", async (req, res) => {
   const errorPares = validarParesMismoBloque(payload.materiasMismoBloque, payload.materias, payload.cursos, payload.cargas);
   if (errorPares) {
     res.status(400).json({ error: errorPares });
+    return;
+  }
+
+  const errorDisponibilidad = validarDisponibilidadProfesor(
+    payload.profesores,
+    payload.dias,
+    payload.cursos,
+    payload.materias,
+    payload.cargas,
+    payload.bloques,
+    payload.deportes,
+    payload.reunionesSeccion
+  );
+  if (errorDisponibilidad) {
+    res.status(400).json({ error: errorDisponibilidad });
+    return;
+  }
+
+  const nombreDepto = new Map(
+    (await prisma.departamento.findMany({ select: { id: true, nombre: true } })).map((d) => [d.id, d.nombre])
+  );
+  const errorColaborativas = validarColaborativas(
+    payload.colaborativas,
+    nombreDepto,
+    payload.dias,
+    payload.bloques,
+    payload.deportes,
+    payload.reunionesSeccion,
+    payload.bloquesColaborativa
+  );
+  if (errorColaborativas) {
+    res.status(400).json({ error: errorColaborativas });
     return;
   }
 

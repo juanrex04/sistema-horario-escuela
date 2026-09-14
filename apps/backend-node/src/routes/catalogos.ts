@@ -1,6 +1,7 @@
 import { Router } from "express";
 import ExcelJS from "exceljs";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { HttpError, mapPrismaError } from "../lib/errors.js";
@@ -478,12 +479,49 @@ router.delete("/bloques/:id", async (req, res) => {
 });
 
 /* ---------------- Profesores ---------------- */
-const profesorSchema = z.object({
+const horaRe = /^\d{2}:\d{2}$/;
+const jornadaParcialSchema = z
+  .object({
+    diaSemanaId: z.number().int().positive(),
+    horaFin: z.string().regex(horaRe),
+  })
+  .refine((j) => j.horaFin > "06:45", {
+    message: "La hora de salida debe ser posterior a las 06:45",
+    path: ["horaFin"],
+  });
+
+const profesorFields = {
   nombre: z.string().min(1),
   departamentoId: z.number().int().positive().optional().nullable(),
   seccionBaseId: z.number().int().positive(),
   prefiereGruposConsecutivos: z.boolean().optional(),
-});
+  esTiempoCompleto: z.boolean().optional(),
+  jornadaParcial: z.array(jornadaParcialSchema).optional().nullable(),
+};
+
+function validarJornadaProfesor(data: any, ctx: z.RefinementCtx): void {
+  if (data.esTiempoCompleto !== false) return;
+  if (!data.jornadaParcial || data.jornadaParcial.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Un docente de tiempo parcial debe tener al menos un día de trabajo configurado.",
+      path: ["jornadaParcial"],
+    });
+    return;
+  }
+  const ids = data.jornadaParcial.map((j: { diaSemanaId: number }) => j.diaSemanaId);
+  if (new Set(ids).size !== ids.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "El día de trabajo no puede repetirse.",
+      path: ["jornadaParcial"],
+    });
+  }
+}
+
+const profesorSchemaBase = z.object(profesorFields);
+const profesorSchema = profesorSchemaBase.superRefine(validarJornadaProfesor);
+const profesorPatchSchema = profesorSchemaBase.partial().superRefine(validarJornadaProfesor);
 
 router.get("/profesores", async (req, res) => {
   const { paginado, page, pageSize, skip, take } = paginar(req);
@@ -524,8 +562,13 @@ router.post("/profesores", async (req, res) => {
   const parsed = profesorSchema.safeParse(req.body);
   if (!parsed.success)
     return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+  const data: Prisma.ProfesorUncheckedCreateInput = {
+    ...parsed.data,
+    esTiempoCompleto: parsed.data.esTiempoCompleto ?? true,
+    jornadaParcial: parsed.data.esTiempoCompleto === false ? parsed.data.jornadaParcial ?? [] : Prisma.DbNull,
+  };
   try {
-    const item = await prisma.profesor.create({ data: parsed.data });
+    const item = await prisma.profesor.create({ data });
     res.status(201).json(item);
   } catch (err) {
     throw mapPrismaError(err);
@@ -534,11 +577,16 @@ router.post("/profesores", async (req, res) => {
 
 router.patch("/profesores/:id", async (req, res) => {
   const id = parseId(req.params.id);
-  const parsed = profesorSchema.partial().safeParse(req.body);
+  const parsed = profesorPatchSchema.safeParse(req.body);
   if (!parsed.success)
     return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+  const { jornadaParcial: _jp, ...resto } = parsed.data;
+  const data: Prisma.ProfesorUpdateInput = { ...resto };
+  if (parsed.data.esTiempoCompleto === true) data.jornadaParcial = Prisma.DbNull;
+  else if (parsed.data.jornadaParcial !== undefined)
+    data.jornadaParcial = parsed.data.jornadaParcial === null ? Prisma.DbNull : parsed.data.jornadaParcial;
   try {
-    const item = await prisma.profesor.update({ where: { id }, data: parsed.data });
+    const item = await prisma.profesor.update({ where: { id }, data });
     res.json(item);
   } catch (err) {
     throw mapPrismaError(err);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
 import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
@@ -8,11 +8,27 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
-import type { Departamento, Profesor, Seccion } from "../lib/types";
+import type { Departamento, DiaSemana, Profesor, Seccion } from "../lib/types";
 
-type FormState = { nombre: string; departamentoId: string; seccionBaseId: string; prefiereGruposConsecutivos: boolean };
+const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 
-const EMPTY: FormState = { nombre: "", departamentoId: "", seccionBaseId: "", prefiereGruposConsecutivos: false };
+type FormState = {
+  nombre: string;
+  departamentoId: string;
+  seccionBaseId: string;
+  prefiereGruposConsecutivos: boolean;
+  esTiempoCompleto: boolean;
+  jornada: { diaSemanaId: number; horaFin: string }[];
+};
+
+const EMPTY: FormState = {
+  nombre: "",
+  departamentoId: "",
+  seccionBaseId: "",
+  prefiereGruposConsecutivos: false,
+  esTiempoCompleto: true,
+  jornada: [],
+};
 
 export default function Docentes() {
   const qc = useQueryClient();
@@ -33,6 +49,14 @@ export default function Docentes() {
   const total = pageData?.total ?? 0;
   const { data: secciones = [] } = useCatalogQuery<Seccion[]>("secciones", "/secciones");
   const { data: departamentos = [] } = useCatalogQuery<Departamento[]>("departamentos", "/departamentos");
+  const { data: dias = [] } = useQuery({ queryKey: ["dias"], queryFn: () => api.get<DiaSemana[]>("/dias") });
+
+  const nombreDia = (id: number) => {
+    const d = dias.find((x) => x.id === id);
+    return d ? DIAS[d.numeroDia - 1] ?? `Día ${d.numeroDia}` : "?";
+  };
+
+  const jornadaCompleta = () => dias.map((d) => ({ diaSemanaId: d.id, horaFin: "16:00" }));
 
   const [editing, setEditing] = useState<Profesor | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -42,8 +66,14 @@ export default function Docentes() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["profesores"] });
 
   const create = useMutation({
-    mutationFn: (data: { nombre: string; departamentoId?: number | null; prefiereGruposConsecutivos?: boolean }) =>
-      api.post("/profesores", data),
+    mutationFn: (data: {
+      nombre: string;
+      departamentoId?: number | null;
+      seccionBaseId: number;
+      prefiereGruposConsecutivos?: boolean;
+      esTiempoCompleto?: boolean;
+      jornadaParcial?: { diaSemanaId: number; horaFin: string }[] | null;
+    }) => api.post("/profesores", data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
@@ -79,7 +109,14 @@ export default function Docentes() {
 
   function openEdit(p: Profesor) {
     setEditing(p);
-    setForm({ nombre: p.nombre, departamentoId: p.departamentoId ? String(p.departamentoId) : "", seccionBaseId: String(p.seccionBaseId), prefiereGruposConsecutivos: p.prefiereGruposConsecutivos ?? false });
+    setForm({
+      nombre: p.nombre,
+      departamentoId: p.departamentoId ? String(p.departamentoId) : "",
+      seccionBaseId: String(p.seccionBaseId),
+      prefiereGruposConsecutivos: p.prefiereGruposConsecutivos ?? false,
+      esTiempoCompleto: p.esTiempoCompleto ?? true,
+      jornada: (p.jornadaParcial ?? []).map((j) => ({ diaSemanaId: j.diaSemanaId, horaFin: j.horaFin })),
+    });
     setFormOpen(true);
   }
 
@@ -95,6 +132,8 @@ export default function Docentes() {
       departamentoId: form.departamentoId ? Number(form.departamentoId) : null,
       seccionBaseId: Number(form.seccionBaseId),
       prefiereGruposConsecutivos: form.prefiereGruposConsecutivos,
+      esTiempoCompleto: form.esTiempoCompleto,
+      jornadaParcial: form.esTiempoCompleto ? null : form.jornada,
     };
     if (editing) update.mutate({ id: editing.id, data });
     else create.mutate(data);
@@ -180,16 +219,17 @@ export default function Docentes() {
             <tr>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Nombre</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Sección de adscripción</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Jornada</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Departamento</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
               <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {isLoading && <TableSkeleton cols={5} />}
+            {isLoading && <TableSkeleton cols={6} />}
             {!isLoading && profesores.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                   <Search className="mx-auto mb-2 h-5 w-5" />
                   Sin resultados para los filtros aplicados.
                 </td>
@@ -212,6 +252,22 @@ export default function Docentes() {
                   <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
                     {p.seccionBase?.nombre ?? "-"}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  {p.esTiempoCompleto !== false ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      Tiempo completo
+                    </span>
+                  ) : (
+                    <span
+                      className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700"
+                      title={(p.jornadaParcial ?? [])
+                        .map((j) => `${nombreDia(j.diaSemanaId)} hasta ${j.horaFin}`)
+                        .join(", ")}
+                    >
+                      Parcial · {(p.jornadaParcial ?? []).length} día(s)
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-600">{p.departamento?.nombre ?? "-"}</td>
                 <td className="px-4 py-3">
@@ -309,6 +365,78 @@ export default function Docentes() {
               </span>
             </span>
           </label>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-sm font-medium text-slate-700">Jornada</p>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="jornada"
+                  checked={form.esTiempoCompleto}
+                  onChange={() => setForm({ ...form, esTiempoCompleto: true })}
+                />
+                Tiempo completo
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="jornada"
+                  checked={!form.esTiempoCompleto}
+                  onChange={() => setForm({ ...form, esTiempoCompleto: false, jornada: jornadaCompleta() })}
+                />
+                Tiempo parcial
+              </label>
+            </div>
+            {form.esTiempoCompleto ? (
+              <p className="mt-2 text-xs text-slate-500">Lun–Vie · 06:45–16:00</p>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                {dias.map((d) => {
+                  const dia = form.jornada.find((j) => j.diaSemanaId === d.id);
+                  const marcado = dia !== undefined;
+                  return (
+                    <div
+                      key={d.id}
+                      className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-2 py-1.5"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setForm((prev) => ({
+                            ...prev,
+                            jornada: on
+                              ? [...prev.jornada, { diaSemanaId: d.id, horaFin: "16:00" }]
+                              : prev.jornada.filter((j) => j.diaSemanaId !== d.id),
+                          }));
+                        }}
+                      />
+                      <span className="flex-1 text-sm text-slate-700">{DIAS[d.numeroDia - 1] ?? `Día ${d.numeroDia}`}</span>
+                      <input
+                        type="time"
+                        value={marcado ? dia.horaFin : ""}
+                        disabled={!marcado}
+                        onChange={(e) => {
+                          const hora = e.target.value;
+                          setForm((prev) => ({
+                            ...prev,
+                            jornada: prev.jornada.map((j) =>
+                              j.diaSemanaId === d.id ? { ...j, horaFin: hora } : j
+                            ),
+                          }));
+                        }}
+                        className="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700 disabled:opacity-40"
+                      />
+                    </div>
+                  );
+                })}
+                {form.jornada.length === 0 && (
+                  <p className="text-xs text-amber-700">Marca al menos un día de trabajo.</p>
+                )}
+              </div>
+            )}
+          </div>
           {(create.error || update.error) && (
             <p className="text-sm text-red-600">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
@@ -328,7 +456,13 @@ export default function Docentes() {
             </button>
             <button
               type="submit"
-              disabled={!form.nombre.trim() || !form.seccionBaseId || create.isPending || update.isPending}
+              disabled={
+                !form.nombre.trim() ||
+                !form.seccionBaseId ||
+                (form.esTiempoCompleto === false && form.jornada.length === 0) ||
+                create.isPending ||
+                update.isPending
+              }
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}

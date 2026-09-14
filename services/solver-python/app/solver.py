@@ -1,6 +1,13 @@
 from ortools.sat.python import cp_model
 
-from .schemas import SolveRequest, Asignacion, SolveResponse, ReunionCalculada
+from .schemas import (
+    SolveRequest,
+    Asignacion,
+    SolveResponse,
+    ReunionCalculada,
+    Bloque,
+    Profesor,
+)
 
 
 def _overlap(b1, b2) -> bool:
@@ -100,12 +107,31 @@ def solve(req: SolveRequest) -> SolveResponse:
                     prohibidas.setdefault(c.id, set()).add(b_id)
 
     # Variables: X[(carga_id, bloque_id)] = 1 si la carga se asigna al bloque
+    profesor_por_id = {p.id: p for p in req.profesores}
+
+    def _disponibilidad_ok(bloque: Bloque, prof: Profesor) -> bool:
+        # Tiempo completo: todos los días hasta las 16:00 (no hay filtro).
+        if prof.es_tiempo_completo:
+            return True
+        # Tiempo parcial: solo trabaja los días de su jornada y hasta la hora
+        # de salida configurada para ese día.
+        for j in prof.jornada:
+            if j.dia_semana_id == bloque.dia_semana_id:
+                return bloque.fin_min <= j.hora_fin
+        return False
+
     variables: dict[tuple[int, int], cp_model.IntVar] = {}
     candidatos: dict[int, list[int]] = {}
     for carga in req.cargas:
         curso = curso_por_id[carga.curso_id]
+        prof = profesor_por_id.get(carga.profesor_id)
         bloqueados = prohibidas.get(carga.id) or set()
-        libre = [b_id for b_id in bloques_por_seccion.get(curso.seccion_id, []) if b_id not in bloqueados]
+        libre = [
+            b_id
+            for b_id in bloques_por_seccion.get(curso.seccion_id, [])
+            if b_id not in bloqueados
+            and (prof is None or _disponibilidad_ok(academic_blocks[b_id], prof))
+        ]
         if len(libre) < carga.bloques_semanales_requeridos:
             return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])
         candidatos[carga.id] = libre
@@ -209,9 +235,13 @@ def solve(req: SolveRequest) -> SolveResponse:
                 if len(vars_conflicto) > 1:
                     model.Add(sum(vars_conflicto) <= 1)
 
-    # 4. Colaborativas de departamento: garantizar un hueco común semanal (cualquier día)
-    #    Candidatos = franjas académicas absolutas de la semana que no estén reservadas
-    #    (ni por deportes ni por reuniones de sección), para no solapar actividades fijas.
+    # 4. Colaborativas de departamento: garantizar un hueco común semanal (cualquier día).
+    #    La reunión ocupa N bloques académicos consecutivos (N configurable globalmente).
+    #    Candidatas = ventanas de N bloques académicos absolutos contiguos del mismo día
+    #    (fin[k] == inicio[k+1]) que no estén reservados (ni por deportes ni por reuniones
+    #    de sección) y que queden dentro de la jornada de TODOS los docentes del departamento:
+    #    si algún miembro de tiempo parcial no está en el colegio durante la ventana, esta se
+    #    descarta (no se programa la reunión en su hora de salida).
     profesores_de_departamento: dict[int, list[int]] = {}
     for col in req.colaborativas:
         if not col.materia_ids:
@@ -241,24 +271,64 @@ def solve(req: SolveRequest) -> SolveResponse:
             continue
         intervalos_candidatos.append(intervalo)
 
+    def _ventanas_consecutivas(n: int) -> list[tuple[int, int, int]]:
+        """Ventanas de n bloques académicos absolutos contiguos del mismo día."""
+        if n <= 1:
+            return list(intervalos_candidatos)
+        por_dia: dict[int, list[tuple[int, int, int]]] = {}
+        for it in intervalos_candidatos:
+            por_dia.setdefault(it[0], []).append(it)
+        ventanas: list[tuple[int, int, int]] = []
+        for dia, lista in por_dia.items():
+            por_inicio: dict[int, list[int]] = {}
+            for idx, it in enumerate(lista):
+                por_inicio.setdefault(it[1], []).append(idx)
+            for it in lista:
+                fin = it[2]
+                pasos = 0
+                while pasos < n - 1:
+                    siguientes = por_inicio.get(fin, [])
+                    if not siguientes:
+                        break
+                    fin = lista[siguientes[0]][2]
+                    pasos += 1
+                if pasos == n - 1:
+                    ventanas.append((dia, it[1], fin))
+        return ventanas
+
+    ventanas_candidatas = _ventanas_consecutivas(max(1, int(req.bloques_colaborativa)))
+
+    def _miembro_presente(ventana: tuple[int, int, int], prof: Profesor | None) -> bool:
+        # Tiempo completo: trabaja todos los días hasta las 16:00 (sin restricción).
+        if prof is None or prof.es_tiempo_completo:
+            return True
+        # Tiempo parcial: debe estar en el colegio todo el rango de la ventana.
+        dia, _ini, fin = ventana
+        return any(
+            j.dia_semana_id == dia and fin <= j.hora_fin
+            for j in prof.jornada
+        )
+
     meet: dict[int, dict[tuple[int, int, int], cp_model.IntVar]] = {}
     for dept_id, prof_ids in profesores_de_departamento.items():
-        if not intervalos_candidatos:
-            return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])
         meet_vars: dict[tuple[int, int, int], cp_model.IntVar] = {}
         prof_set = set(prof_ids)
-        for intervalo in intervalos_candidatos:
-            var = model.NewBoolVar(f"MEET_{dept_id}_{intervalo[0]}_{intervalo[1]}_{intervalo[2]}")
-            meet_vars[intervalo] = var
+        for ventana in ventanas_candidatas:
+            if not all(_miembro_presente(ventana, profesor_por_id.get(p)) for p in prof_ids):
+                continue
+            var = model.NewBoolVar(f"MEET_{dept_id}_{ventana[0]}_{ventana[1]}_{ventana[2]}")
+            meet_vars[ventana] = var
             for c in req.cargas:
                 if c.profesor_id not in prof_set:
                     continue
                 for b_id in candidatos.get(c.id, []):
                     b = academic_blocks[b_id]
                     if _overlap_times(
-                        b.dia_semana_id, int(b.inicio_min), int(b.fin_min), *intervalo
+                        b.dia_semana_id, int(b.inicio_min), int(b.fin_min), *ventana
                     ):
                         model.Add(var + variables[(c.id, b_id)] <= 1)
+        if not meet_vars:
+            return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])
         meet[dept_id] = meet_vars
         model.Add(sum(meet_vars.values()) >= 1)
 

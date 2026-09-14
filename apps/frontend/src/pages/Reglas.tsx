@@ -32,8 +32,10 @@ export default function Reglas() {
   const [reuniones, setReuniones] = useState<ReunionDraft[]>([]);
   const [deportes, setDeportes] = useState<DeporteDraft[]>([]);
   const [pares, setPares] = useState<ParDraft[]>([]);
+  const [bloquesColab, setBloquesColab] = useState(2);
 
   const aplicar = (data: Reglas) => {
+    setBloquesColab(data.bloquesColaborativa ?? 2);
     setReuniones(
       data.reunionesSeccion.map((r) => ({
         diaSemanaId: r.diaSemanaId,
@@ -97,6 +99,7 @@ export default function Reglas() {
       reunionesSeccion: ReunionDraft[];
       deportes: DeporteFila[];
       materiasMismoBloque: ParDraft[];
+      bloquesColaborativa?: number;
     }) => api.put<Reglas>("/reglas", payload),
     onSuccess: (data) => {
       qc.setQueryData(["reglas"], data);
@@ -113,6 +116,13 @@ export default function Reglas() {
     save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(d), materiasMismoBloque: pares });
   const guardarPares = (p: ParDraft[]) =>
     save.mutate({ reunionesSeccion: reuniones, deportes: expandeDeportes(deportes), materiasMismoBloque: p });
+  const guardarBloques = (n: number) =>
+    save.mutate({
+      reunionesSeccion: reuniones,
+      deportes: expandeDeportes(deportes),
+      materiasMismoBloque: pares,
+      bloquesColaborativa: n,
+    });
 
   const expandeDeportes = (d: DeporteDraft[]): DeporteFila[] =>
     d.flatMap((dep) =>
@@ -495,9 +505,27 @@ export default function Reglas() {
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
-          <Handshake className="h-5 w-5 text-amber-600" />
-          <h2 className="font-semibold text-slate-800">Colaborativas de departamento</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Handshake className="h-5 w-5 text-amber-600" />
+            <h2 className="font-semibold text-slate-800">Colaborativas de departamento</h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium text-slate-600">Bloques consecutivos</label>
+            <select
+              value={bloquesColab}
+              onChange={(e) => guardarBloques(Number(e.target.value))}
+              disabled={save.isPending}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n} {n === 1 ? "bloque" : "bloques"}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-500">La reunión ocupará {bloquesColab} {bloquesColab === 1 ? "bloque" : "bloques"} consecutivos.</span>
+          </div>
         </div>
         <div className="divide-y divide-slate-100">
           {departamentos.length === 0 && (
@@ -513,7 +541,7 @@ export default function Reglas() {
                     {col
                       ? `Hueco detectado (última generación): ${nombreDia(col.diaSemanaId)} ${col.horaInicio}–${col.horaFin}`
                       : d.reunionActiva
-                        ? "Activa: el solucionador buscará el hueco común al generar."
+                        ? `Activa: el solucionador buscará un hueco de ${bloquesColab} ${bloquesColab === 1 ? "bloque" : "bloques"} consecutivos al generar.`
                         : "Inactiva: no se garantiza reunión semanal."}
                   </p>
                 </div>

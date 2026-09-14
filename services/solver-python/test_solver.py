@@ -1,7 +1,7 @@
-from app.solver import solve
+from app.solver import solve, _overlap_times
 from app.schemas import (
     SolveRequest, Seccion, Dia, Bloque, Profesor, Curso, Materia, Carga,
-    ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque,
+    ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque, JornadaDia,
 )
 
 DIAS = [
@@ -126,6 +126,7 @@ result4 = solve(payload4)
 assert result4.status == "OPTIMAL", result4.status
 assert len(result4.colaborativas) == 1, result4.colaborativas
 col = result4.colaborativas[0]
+assert col.hora_fin - col.hora_inicio == 120, "colaborativa de 2 bloques consecutivos"
 for a in result4.asignaciones:
     b = next(x for x in payload4.bloques if x.id == a.bloque_horario_id)
     assert not (
@@ -326,5 +327,173 @@ bloques_a = {a.bloque_horario_id for a in result12.asignaciones if a.carga_acade
 bloques_b = {a.bloque_horario_id for a in result12.asignaciones if a.carga_academica_id == 2}
 assert bloques_a.isdisjoint(bloques_b), (bloques_a, bloques_b)
 print(f"[12] sin par: bloques disjuntos ({sorted(bloques_a)} vs {sorted(bloques_b)}) OK")
+
+# 13. Docente de tiempo parcial: solo trabaja el día 1; 4 bloques disponibles,
+# necesita 5 => INFEASIBLE.
+payload13 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[
+        Profesor(
+            id=1, nombre="Parcial", seccionBaseId=1,
+            esTiempoCompleto=False,
+            jornada=[JornadaDia(diaSemanaId=1, hora_fin=660)],
+        )
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=5)],
+)
+result13 = solve(payload13)
+assert result13.status == "INFEASIBLE", result13.status
+print("[13] parcial con bloques insuficientes -> INFEASIBLE OK")
+
+# 14. Docente de tiempo parcial: día 1 hasta 10:00 (600 min), día 2 hasta 11:00
+# (660 min). Las asignaciones deben respetar la hora tope de cada día.
+BLOQUES_TOTALES = {b.id: b for b in bloques_2dias()}
+limite_por_dia = {1: 600, 2: 660}
+payload14 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[
+        Profesor(
+            id=1, nombre="Parcial", seccionBaseId=1,
+            esTiempoCompleto=False,
+            jornada=[
+                JornadaDia(diaSemanaId=1, hora_fin=limite_por_dia[1]),
+                JornadaDia(diaSemanaId=2, hora_fin=limite_por_dia[2]),
+            ],
+        )
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1")],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=4)],
+)
+result14 = solve(payload14)
+assert result14.status in ("OPTIMAL", "FEASIBLE"), result14.status
+assert result14.num_asignaciones == 4, result14.num_asignaciones
+for a in result14.asignaciones:
+    b = BLOQUES_TOTALES[a.bloque_horario_id]
+    assert b.fin_min <= limite_por_dia[b.dia_semana_id], (b.id, b.dia_semana_id, b.fin_min)
+print("[14] parcial respeta la hora tope de cada día OK")
+
+# 15. Colaborativa global de 3 bloques consecutivos (configurable).
+payload15 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_simples(),
+    profesores=[
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=1),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=1),
+        Carga(id=2, cursoId=2, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=1),
+    ],
+    colaborativas=[ColaborativaEntrada(departamentoId=1, materiaIds=[1, 2])],
+    bloquesColaborativa=3,
+)
+result15 = solve(payload15)
+assert result15.status == "OPTIMAL", result15.status
+col15 = result15.colaborativas[0]
+assert col15.hora_fin - col15.hora_inicio == 180, col15
+for a in result15.asignaciones:
+    b = next(x for x in payload15.bloques if x.id == a.bloque_horario_id)
+    assert not _overlap_times(
+        b.dia_semana_id, b.inicio_min, b.fin_min,
+        col15.dia_semana_id, col15.hora_inicio, col15.hora_fin,
+    ), "docente del depto dicta durante la colaborativa"
+print(f"[15] colaborativa global de 3 bloques ({col15.hora_inicio}-{col15.hora_fin}) OK")
+
+# 16. Con un bloque intermedio reservado (deportes día 1, período 2), la ventana
+#     salta el hueco y usa únicamente bloques consecutivos libres.
+payload16 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1"), Seccion(id=2, nombre="Sec2")],
+    dias=DIAS,
+    bloques=bloques_simples(n_sec=2),
+    profesores=[
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="B", seccionBaseId=2),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=1),
+        Carga(id=2, cursoId=2, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    colaborativas=[ColaborativaEntrada(departamentoId=1, materiaIds=[1, 2])],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="2")],
+)
+result16 = solve(payload16)
+assert result16.status == "OPTIMAL", result16.status
+col16 = result16.colaborativas[0]
+assert col16.dia_semana_id == 1, col16
+assert col16.hora_inicio == 540 and col16.hora_fin == 660, col16
+print("[16] ventana de 2 bloques salta el bloque reservado OK")
+
+# 17. Miembro de tiempo parcial limita la ventana: la colaborativa no puede quedar
+#     en la franja posterior a la salida del parcial (hasta 10:00 = 600 min).
+payload17 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_simples(),
+    profesores=[
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="Parcial", seccionBaseId=1,
+                 esTiempoCompleto=False, jornada=[JornadaDia(diaSemanaId=1, hora_fin=600)]),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=1),
+    ],
+    colaborativas=[ColaborativaEntrada(departamentoId=1, materiaIds=[1, 2])],
+)
+result17 = solve(payload17)
+assert result17.status == "OPTIMAL", result17.status
+col17 = result17.colaborativas[0]
+assert col17.hora_fin - col17.hora_inicio == 120, col17
+assert col17.hora_inicio != 540, "ventana 540-660 excede la jornada del parcial y debe descartarse"
+assert col17.hora_fin <= 600, col17
+print(f"[17] colaborativa dentro de la jornada del parcial ({col17.hora_inicio}-{col17.hora_fin}) OK")
+
+# 18. Parcial que sale a las 08:00 (480): ninguna ventana de 2 bloques cabe en su
+#     jornada => INFEASIBLE.
+payload18 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_simples(),
+    profesores=[
+        Profesor(id=1, nombre="A", seccionBaseId=1),
+        Profesor(id=2, nombre="Parcial", seccionBaseId=1,
+                 esTiempoCompleto=False, jornada=[JornadaDia(diaSemanaId=1, hora_fin=480)]),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=1)],
+    materias=[Materia(id=1, nombre="M1"), Materia(id=2, nombre="M2")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=1),
+    ],
+    colaborativas=[ColaborativaEntrada(departamentoId=1, materiaIds=[1, 2])],
+)
+result18 = solve(payload18)
+assert result18.status == "INFEASIBLE", result18.status
+print("[18] sin ventana dentro de la jornada del parcial -> INFEASIBLE OK")
+
+# 19. El payload real envía la jornada en camelCase (diaSemanaId/horaFin): el schema
+#     debe parsearlo por alias (regresión del 422 en /solve).
+jornada_ok = JornadaDia.model_validate({"diaSemanaId": 2, "horaFin": 600})
+assert jornada_ok.dia_semana_id == 2 and jornada_ok.hora_fin == 600
+prof_payload = Profesor.model_validate({
+    "id": 1, "nombre": "P", "seccionBaseId": 1, "prefiereGruposConsecutivos": False,
+    "esTiempoCompleto": False, "jornada": [{"diaSemanaId": 2, "horaFin": 600}],
+})
+assert prof_payload.jornada[0].hora_fin == 600
+print("[19] jornada parseada por alias desde el payload OK")
 
 print("OK")

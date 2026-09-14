@@ -26,6 +26,8 @@ export type Profesor = {
   departamentoId: number | null;
   departamento?: Departamento | null;
   prefiereGruposConsecutivos?: boolean;
+  esTiempoCompleto?: boolean;
+  jornadaParcial?: { diaSemanaId: number; horaFin: string }[] | null;
   _count?: { cargas: number };
 };
 export type Curso = { id: number; seccionId: number; nombre: string; seccion?: Seccion; _count?: { cargas: number } };
@@ -68,6 +70,7 @@ export type Reglas = {
   reunionesSeccion: ReunionSeccion[];
   deportes: DeporteSeccion[];
   materiasMismoBloque: ParMateriasMismoBloque[];
+  bloquesColaborativa?: number;
 };
 export type ColaborativaGenerada = {
   id: number;

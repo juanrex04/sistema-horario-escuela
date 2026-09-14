@@ -60,6 +60,8 @@ model Profesor {
   departamento              Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
   departamentoId            Int?
   prefiereGruposConsecutivos Boolean @default(false)
+  esTiempoCompleto          Boolean  @default(true)
+  jornadaParcial            Json?
   cargas                    CargaAcademica[]
 }
 
@@ -100,6 +102,11 @@ model Departamento {
   materias       Materia[]
   colaborativas  ColaborativaGenerada[]
   profesores     Profesor[]
+}
+
+model Configuracion {
+  clave String @id
+  valor String
 }
 
 model ReunionSeccion {

@@ -42,6 +42,7 @@ const reglasSchema = z.object({
   reunionesSeccion: z.array(reunionSchema),
   deportes: z.array(deporteSchema),
   materiasMismoBloque: z.array(materiaMismoBloqueSchema),
+  bloquesColaborativa: z.number().int().min(1).max(4),
 });
 
 function normalizarPares(pares: { materiaAId: number; materiaBId: number }[]) {
@@ -58,8 +59,10 @@ function normalizarPares(pares: { materiaAId: number; materiaBId: number }[]) {
   return unicos;
 }
 
+const BLOQUES_COLABORATIVA_KEY = "bloquesColaborativa";
+
 async function getSnapshot() {
-  const [reunionesSeccion, deportes, materiasMismoBloque] = await Promise.all([
+  const [reunionesSeccion, deportes, materiasMismoBloque, config] = await Promise.all([
     prisma.reunionSeccion.findMany({
       include: { secciones: { select: { id: true, nombre: true } } },
       orderBy: [{ diaSemanaId: "asc" }, { horaInicio: "asc" }],
@@ -72,8 +75,9 @@ async function getSnapshot() {
       include: { materiaA: { select: { id: true, nombre: true } }, materiaB: { select: { id: true, nombre: true } } },
       orderBy: [{ materiaAId: "asc" }, { materiaBId: "asc" }],
     }),
+    prisma.configuracion.findUnique({ where: { clave: BLOQUES_COLABORATIVA_KEY } }),
   ]);
-  return { reunionesSeccion, deportes, materiasMismoBloque };
+  return { reunionesSeccion, deportes, materiasMismoBloque, bloquesColaborativa: Number(config?.valor) || 2 };
 }
 
 router.get("/reglas", async (_req, res) => {
@@ -86,7 +90,7 @@ router.put("/reglas", async (req, res) => {
     res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
     return;
   }
-  const { reunionesSeccion, deportes, materiasMismoBloque } = parsed.data;
+  const { reunionesSeccion, deportes, materiasMismoBloque, bloquesColaborativa } = parsed.data;
 
   const [secciones, dias] = await Promise.all([
     prisma.seccion.findMany({ select: { id: true, nombre: true } }),
@@ -142,6 +146,11 @@ router.put("/reglas", async (req, res) => {
           data: { materiaAId: p.materiaAId, materiaBId: p.materiaBId },
         });
       }
+      await tx.configuracion.upsert({
+        where: { clave: BLOQUES_COLABORATIVA_KEY },
+        update: { valor: String(bloquesColaborativa) },
+        create: { clave: BLOQUES_COLABORATIVA_KEY, valor: String(bloquesColaborativa) },
+      });
     });
     res.json(await getSnapshot());
   } catch (err) {
