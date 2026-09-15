@@ -733,6 +733,116 @@ router.delete("/materias/:id", async (req, res) => {
   res.status(204).end();
 });
 
+/* ---------------- Espacios ---------------- */
+const espacioSchema = z.object({
+  nombre: z.string().min(1),
+});
+
+const vinculoEspacioSchema = z.object({
+  materiaId: z.number().int().positive(),
+  seccionId: z.number().int().positive().nullish(),
+});
+
+const espacioInclude = {
+  materias: {
+    include: {
+      materia: { select: { id: true, nombre: true } },
+      seccion: { select: { id: true, nombre: true } },
+    },
+    orderBy: { id: "asc" as const },
+  },
+  _count: { select: { materias: true } },
+};
+
+router.get("/espacios", async (req, res) => {
+  const { paginado, page, pageSize, skip, take } = paginar(req);
+  const where = { nombre: contains(qs.str(req.query.q)) };
+  const items = await prisma.espacio.findMany({
+    where,
+    include: espacioInclude,
+    orderBy: { nombre: "asc" },
+    ...(paginado ? { skip, take } : {}),
+  });
+  if (!paginado) return res.json(items);
+  const total = await prisma.espacio.count({ where });
+  res.json({ items, total, page, pageSize });
+});
+
+router.get("/espacios/:id", async (req, res) => {
+  const item = await prisma.espacio.findUnique({
+    where: { id: parseId(req.params.id) },
+    include: espacioInclude,
+  });
+  if (!item) throw new HttpError(404, "Espacio no encontrado.");
+  res.json(item);
+});
+
+router.post("/espacios", async (req, res) => {
+  const parsed = espacioSchema.safeParse(req.body);
+  if (!parsed.success)
+    return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+  try {
+    const item = await prisma.espacio.create({ data: { nombre: parsed.data.nombre } });
+    res.status(201).json(item);
+  } catch (err) {
+    throw mapPrismaError(err);
+  }
+});
+
+router.patch("/espacios/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  const parsed = espacioSchema.partial().safeParse(req.body);
+  if (!parsed.success)
+    return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+  try {
+    const item = await prisma.espacio.update({ where: { id }, data: parsed.data });
+    res.json(item);
+  } catch (err) {
+    throw mapPrismaError(err);
+  }
+});
+
+router.patch("/espacios/:id/materias", async (req, res) => {
+  const id = parseId(req.params.id);
+  const parsed = z.object({ vinculos: z.array(vinculoEspacioSchema) }).safeParse(req.body);
+  if (!parsed.success)
+    return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+
+  // Dedupe en código: seccionId nulo (global) no colapsa con filas existentes en la BD.
+  const vistos = new Set<string>();
+  const vinculosUnicos: { materiaId: number; seccionId: number | null }[] = [];
+  for (const v of parsed.data.vinculos) {
+    const k = `${v.materiaId}_${v.seccionId ?? 0}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    vinculosUnicos.push({ materiaId: v.materiaId, seccionId: v.seccionId ?? null });
+  }
+
+  try {
+    const item = await prisma.$transaction(async (tx) => {
+      await tx.materiaEspacio.deleteMany({ where: { espacioId: id } });
+      for (const v of vinculosUnicos) {
+        await tx.materiaEspacio.create({
+          data: { materiaId: v.materiaId, espacioId: id, seccionId: v.seccionId },
+        });
+      }
+      return tx.espacio.findUnique({ where: { id }, include: espacioInclude });
+    });
+    res.json(item);
+  } catch (err) {
+    throw mapPrismaError(err);
+  }
+});
+
+router.delete("/espacios/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  const count = await prisma.materiaEspacio.count({ where: { espacioId: id } });
+  if (count > 0)
+    throw new HttpError(409, "El espacio tiene materias asignadas. Desasigna las materias primero.");
+  await prisma.espacio.delete({ where: { id } });
+  res.status(204).end();
+});
+
 /* ---------------- Departamentos ---------------- */
 const departamentoSchema = z.object({
   nombre: z.string().min(1),

@@ -25,6 +25,7 @@ model Seccion {
   reunionSecciones    ReunionSeccion[] @relation("ReunionSeccionSeccion")
   deportes            DeporteSeccion[]
   profesoresAdscritos Profesor[]
+  materiasEspacio     MateriaEspacio[]
 }
 
 model DiaSemana {
@@ -85,6 +86,7 @@ model Materia {
   cargas         CargaAcademica[]
   mismoBloqueA   MateriaMismoBloque[]  @relation("MateriaMismoBloqueA")
   mismoBloqueB   MateriaMismoBloque[]  @relation("MateriaMismoBloqueB")
+  espacios       MateriaEspacio[]
 }
 
 model MateriaMismoBloque {
@@ -97,6 +99,28 @@ model MateriaMismoBloque {
   curso      Curso?  @relation(fields: [cursoId], references: [id], onDelete: Cascade)
 
   @@unique([materiaAId, materiaBId, cursoId])
+}
+
+model Espacio {
+  id              Int              @id @default(autoincrement())
+  nombre          String           @unique
+  materias        MateriaEspacio[]
+
+  @@index([nombre])
+}
+
+model MateriaEspacio {
+  id         Int      @id @default(autoincrement())
+  materia    Materia  @relation(fields: [materiaId], references: [id], onDelete: Cascade)
+  materiaId  Int
+  espacio    Espacio  @relation(fields: [espacioId], references: [id], onDelete: Cascade)
+  espacioId  Int
+  seccionId  Int?
+  seccion    Seccion? @relation(fields: [seccionId], references: [id], onDelete: Cascade)
+
+  @@index([materiaId])
+  @@index([espacioId])
+  @@index([seccionId])
 }
 
 model Departamento {

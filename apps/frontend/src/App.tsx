@@ -11,6 +11,7 @@ import Cargas from "./pages/Cargas";
 import Bloques from "./pages/Bloques";
 import Departamentos from "./pages/Departamentos";
 import Reglas from "./pages/Reglas";
+import Espacios from "./pages/Espacios";
 
 function Shell() {
   const { user } = useAuth();
@@ -26,6 +27,7 @@ function Shell() {
         <Route path="/materias" element={<Materias />} />
         <Route path="/departamentos" element={<Departamentos />} />
         <Route path="/reglas" element={<Reglas />} />
+        <Route path="/espacios" element={<Espacios />} />
         <Route path="/cargas" element={<Cargas />} />
         <Route path="/bloques" element={<Bloques />} />
         <Route path="*" element={<Navigate to="/horario" replace />} />

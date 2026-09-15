@@ -84,6 +84,19 @@ export type ColaborativaGenerada = {
   horaInicio: string;
   horaFin: string;
 };
+export type Espacio = {
+  id: number;
+  nombre: string;
+  materias?: {
+    id: number;
+    materiaId: number;
+    espacioId: number;
+    seccionId?: number | null;
+    materia?: { id: number; nombre: string };
+    seccion?: { id: number; nombre: string } | null;
+  }[];
+  _count?: { materias: number };
+};
 export type CargaAcademica = {
   id: number;
   cursoId: number;
@@ -113,4 +126,5 @@ export type GenerateResult = {
   colaborativas?: { departamentoId: number; diaSemanaId: number; horaInicio: number; horaFin: number }[];
   numConsecutivos?: number;
   numDiasUsados?: number;
+  numPEAntesLunch?: number;
 };

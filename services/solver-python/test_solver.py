@@ -2,7 +2,7 @@ from app.solver import solve, _overlap_times
 from app.schemas import (
     SolveRequest, Seccion, Dia, Bloque, Profesor, Curso, Materia, Carga,
     ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque, JornadaDia,
-    DiasSinPEPorSeccion, ParPEMismoDia,
+    DiasSinPEPorSeccion, ParPEMismoDia, Espacio, MateriaEspacioEntrada,
 )
 
 DIAS = [
@@ -748,5 +748,126 @@ dias6b_28 = {next(x for x in payload28.bloques if x.id == a.bloque_horario_id).d
 assert dias6a_28 == dias6b_28, f"mismo día: {dias6a_28} vs {dias6b_28}"
 assert 1 not in dias6a_28, f"PE no puede caer en día 1 (deportes): {dias6a_28}"
 print(f"[28] 6A/6B mismo día sin deportes (A+B): {sorted(dias6a_28)} OK")
+
+# 29. Espacios compartidos (global): dos secciones con bloques en el mismo tramo
+#     horario. Computer Science (dos profesores) usa un laboratorio compartido:
+#     las cargas no pueden caer en bloques solapados entre sí.
+#     2 secciones x 4 bloques [07:00-10:40]. 2 cargas (una por sección), mismos
+#     tiempos absolutos: sin restricción se solaparían; con el espacio compartido
+#     quedan en bloques distintos.
+def _bloques_2secciones_mismo_horario():
+    out = []
+    i = 1
+    for s in (1, 2):
+        for p, ini, fin in ((1, 420, 480), (2, 480, 540), (3, 540, 600), (4, 600, 660)):
+            out.append(Bloque(id=i, seccionId=s, diaSemanaId=1, numeroPeriodo=str(p),
+                              inicioMin=ini, finMin=fin, esAcademico=True))
+            i += 1
+    return out
+
+
+def _no_solapan(payload_result, result, carga_a, carga_b):
+    lbs_a = []
+    lbs_b = []
+    for a in result.asignaciones:
+        bloque = next(x for x in payload_result.bloques if x.id == a.bloque_horario_id)
+        if a.carga_academica_id == carga_a:
+            lbs_a.append(bloque)
+        elif a.carga_academica_id == carga_b:
+            lbs_b.append(bloque)
+    for ba in lbs_a:
+        for bb in lbs_b:
+            if _overlap_times(ba.dia_semana_id, ba.inicio_min, ba.fin_min,
+                              bb.dia_semana_id, bb.inicio_min, bb.fin_min):
+                return False
+    return True
+
+
+bloques_sec2 = _bloques_2secciones_mismo_horario()
+payload29 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Primaria"), Seccion(id=2, nombre="Middle")],
+    dias=DIAS,
+    bloques=bloques_sec2,
+    profesores=[
+        Profesor(id=1, nombre="Carlos", seccionBaseId=1),
+        Profesor(id=2, nombre="Juan", seccionBaseId=2),
+    ],
+    cursos=[Curso(id=1, nombre="7A", seccionId=1), Curso(id=2, nombre="1A", seccionId=2)],
+    materias=[Materia(id=1, nombre="Computer Science")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    espacios=[Espacio(id=1, nombre="Laboratorio de cómputo")],
+    materiasEspacios=[MateriaEspacioEntrada(materiaId=1, espacioId=1, seccionId=None)],
+)
+result29 = solve(payload29)
+assert result29.status == "OPTIMAL", result29.status
+assert _no_solapan(payload29, result29, 1, 2), "CS 7A y 1A no pueden coincidir (espacio compartido)"
+assert (result29.num_pe_antes_lunch or 0) == 0, result29.num_pe_antes_lunch
+print("[29] espacio compartido global: CS Carlos y Juan no se solapan OK")
+
+# 30. Espacio acotado por sección: el vínculo se restringe a la sección 1, así que
+#     la carga de la sección 2 queda libre de la restricción y puede solaparse.
+bloques_sec2b = _bloques_2secciones_mismo_horario()
+payload30 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Primaria"), Seccion(id=2, nombre="Middle")],
+    dias=DIAS,
+    bloques=bloques_sec2b,
+    profesores=[
+        Profesor(id=1, nombre="Carlos", seccionBaseId=1),
+        Profesor(id=2, nombre="Juan", seccionBaseId=2),
+    ],
+    cursos=[Curso(id=1, nombre="7A", seccionId=1), Curso(id=2, nombre="1A", seccionId=2)],
+    materias=[Materia(id=1, nombre="Computer Science")],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    espacios=[Espacio(id=1, nombre="Laboratorio de cómputo")],
+    materiasEspacios=[MateriaEspacioEntrada(materiaId=1, espacioId=1, seccionId=1)],
+)
+result30 = solve(payload30)
+assert result30.status == "OPTIMAL", result30.status
+assert result30.num_asignaciones == 4, result30.num_asignaciones
+libre_seccion2 = any(
+    _overlap_times(
+        next(x for x in payload30.bloques if x.id == a1.bloque_horario_id).dia_semana_id,
+        next(x for x in payload30.bloques if x.id == a1.bloque_horario_id).inicio_min,
+        next(x for x in payload30.bloques if x.id == a1.bloque_horario_id).fin_min,
+        next(x for x in payload30.bloques if x.id == a2.bloque_horario_id).dia_semana_id,
+        next(x for x in payload30.bloques if x.id == a2.bloque_horario_id).inicio_min,
+        next(x for x in payload30.bloques if x.id == a2.bloque_horario_id).fin_min,
+    )
+    for a1 in result30.asignaciones if a1.carga_academica_id == 1
+    for a2 in result30.asignaciones if a2.carga_academica_id == 2
+)
+assert libre_seccion2, "con vínculo acotado a sección 1, la carga de sección 2 debería poder solaparse"
+print("[30] espacio acotado por sección: sección 2 queda libre OK")
+
+# 31. (Blando) P.E. antes del LUNCH: un bloque no académico "LUNCH" separa el día.
+#     Con 3 bloques académicos por día y P.E. de 2 bloques, el premio blando debe
+#     ubicarla en los bloques previos al almuerzo (métrica numPEAntesLunch=2).
+bloques_r31 = []
+t = 1
+for p, ini, fin in ((1, 420, 480), (2, 480, 540), (3, 660, 720)):
+    bloques_r31.append(Bloque(id=t, seccionId=1, diaSemanaId=1, numeroPeriodo=str(p),
+                              inicioMin=ini, finMin=fin, esAcademico=True))
+    t += 1
+bloques_r31.append(Bloque(id=t, seccionId=1, diaSemanaId=1, numeroPeriodo="LUNCH",
+                          inicioMin=600, finMin=660, esAcademico=False))
+payload31 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_r31,
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="7A", seccionId=1)],
+    materias=[Materia(id=1, nombre="P.E", esEducacionFisica=True)],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+)
+result31 = solve(payload31)
+assert result31.status == "OPTIMAL", result31.status
+assert result31.num_pe_antes_lunch == 2, f"PE debería quedar antes del LUNCH: {result31.num_pe_antes_lunch}"
+print("[31] P.E. antes del LUNCH (blando): numPEAntesLunch=2 OK")
 
 print("OK")

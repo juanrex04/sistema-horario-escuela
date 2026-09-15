@@ -44,6 +44,7 @@ def _grado_base(nombre: str) -> str:
 PESO_CONSECUTIVOS = 100
 PESO_DISTRIBUCION = 10
 PESO_EXCESO = 40
+PESO_PE_ANTES_LUNCH = 30
 
 
 def solve(req: SolveRequest) -> SolveResponse:
@@ -313,6 +314,45 @@ def solve(req: SolveRequest) -> SolveResponse:
                 if len(vars_conflicto) > 1:
                     model.Add(sum(vars_conflicto) <= 1)
 
+    # 3c. Espacios compartidos: las cargas cuya materia usa el mismo espacio (vínculo
+    #     global o acotado a una sección) no pueden caer en bloques que se solapan en
+    #     el tiempo, ni compartir el mismo bloque (dos cursos distintos no pueden
+    #     ocupar la misma sala a la vez). Mismo patrón que el no-solapamiento docente.
+    cargas_por_espacio: dict[int, set[int]] = {}
+    for vinculo in req.materias_espacios:
+        grupo = cargas_por_espacio.setdefault(vinculo.espacio_id, set())
+        for carga in req.cargas:
+            if vinculo.materia_id != carga.materia_id:
+                continue
+            if vinculo.seccion_id is not None:
+                curso = curso_por_id.get(carga.curso_id)
+                if curso is None or curso.seccion_id != vinculo.seccion_id:
+                    continue
+            grupo.add(carga.id)
+
+    for espacio_id, lista_cargas in cargas_por_espacio.items():
+        lista_cargas = [c for c in lista_cargas if c in carga_por_id]
+        if not lista_cargas:
+            continue
+        for i, b1_id in enumerate(bloques_ids):
+            b1 = bloques_por_id[b1_id]
+            for b2_id in bloques_ids[i:]:
+                b2 = bloques_por_id[b2_id]
+                if not _overlap(b1, b2):
+                    continue
+                if b1_id == b2_id:
+                    vars_conflicto = [
+                        variables[(c, b1_id)] for c in lista_cargas if (c, b1_id) in variables
+                    ]
+                else:
+                    vars_conflicto = [
+                        variables[(c, b1_id)] for c in lista_cargas if (c, b1_id) in variables
+                    ] + [
+                        variables[(c, b2_id)] for c in lista_cargas if (c, b2_id) in variables
+                    ]
+                if len(vars_conflicto) > 1:
+                    model.Add(sum(vars_conflicto) <= 1)
+
     # 4. Colaborativas de departamento: garantizar un hueco común semanal (cualquier día).
     #    La reunión ocupa N bloques académicos consecutivos (N configurable globalmente).
     #    Candidatas = ventanas de N bloques académicos absolutos contiguos del mismo día
@@ -503,10 +543,43 @@ def solve(req: SolveRequest) -> SolveResponse:
             variables_dias.append(usa)
             variables_exceso.append(exceso)
 
+    # 6b. (Blando) Preferencia de educación física antes del LUNCH: los escenarios
+    #     deportivos se comparten con el deporte de bachillerato, así que se premia
+    #     (sin romper viabilidad) que cada bloque de P.E. quede antes de la pausa de
+    #     almuerzo de su sección y día. La pausa se identifica por su bloque no
+    #     académico con numeroPeriodo 'LUNCH'.
+    lunch_inicio_por_seccion_dia: dict[tuple[int, int], int] = {}
+    for b in req.bloques:
+        if b.es_academico:
+            continue
+        if (b.numero_periodo or "").strip().upper() != "LUNCH":
+            continue
+        key = (b.seccion_id, b.dia_semana_id)
+        previo = lunch_inicio_por_seccion_dia.get(key)
+        if previo is None or int(b.inicio_min) < previo:
+            lunch_inicio_por_seccion_dia[key] = int(b.inicio_min)
+
+    variables_pe_antes_lunch: list[cp_model.IntVar] = []
+    for carga in req.cargas:
+        materia = materia_por_id.get(carga.materia_id)
+        if materia is None or not materia.es_educacion_fisica:
+            continue
+        curso = curso_por_id.get(carga.curso_id)
+        if curso is None:
+            continue
+        for b_id in candidatos.get(carga.id, []):
+            b = academic_blocks[b_id]
+            lunch = lunch_inicio_por_seccion_dia.get((curso.seccion_id, b.dia_semana_id))
+            if lunch is None:
+                continue
+            if int(b.fin_min) <= lunch:
+                variables_pe_antes_lunch.append(variables[(carga.id, b_id)])
+
     model.Maximize(
         PESO_CONSECUTIVOS * sum(variables_consecutivos)
         + PESO_DISTRIBUCION * sum(variables_dias)
         - PESO_EXCESO * sum(variables_exceso)
+        + PESO_PE_ANTES_LUNCH * sum(variables_pe_antes_lunch)
     )
 
     solver = cp_model.CpSolver()
@@ -547,6 +620,9 @@ def solve(req: SolveRequest) -> SolveResponse:
             ),
             num_dias_usados=sum(
                 1 for v in variables_dias if solver.Value(v) == 1
+            ),
+            num_pe_antes_lunch=sum(
+                1 for v in variables_pe_antes_lunch if solver.Value(v) == 1
             ),
         )
 

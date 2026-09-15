@@ -111,6 +111,19 @@ class ParPEMismoDia(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class Espacio(BaseModel):
+    id: int
+    nombre: str
+
+
+class MateriaEspacioEntrada(BaseModel):
+    materia_id: int = Field(alias="materiaId")
+    espacio_id: int = Field(alias="espacioId")
+    seccion_id: int | None = Field(default=None, alias="seccionId")
+
+    model_config = {"populate_by_name": True}
+
+
 class SolveRequest(BaseModel):
     secciones: list[Seccion] = []
     dias: list[Dia] = []
@@ -130,6 +143,10 @@ class SolveRequest(BaseModel):
     )
     pares_pe_mismo_dia: list[ParPEMismoDia] = Field(
         default_factory=list, alias="paresPEMismoDia"
+    )
+    espacios: list[Espacio] = Field(default_factory=list)
+    materias_espacios: list[MateriaEspacioEntrada] = Field(
+        default_factory=list, alias="materiasEspacios"
     )
     bloques_colaborativa: int = Field(default=2, alias="bloquesColaborativa")
 
@@ -157,5 +174,6 @@ class SolveResponse(BaseModel):
     colaborativas: list[ReunionCalculada] = Field(default_factory=list)
     num_consecutivos: int = Field(default=0, alias="numConsecutivos")
     num_dias_usados: int = Field(default=0, alias="numDiasUsados")
+    num_pe_antes_lunch: int = Field(default=0, alias="numPEAntesLunch")
 
     model_config = {"populate_by_name": True}

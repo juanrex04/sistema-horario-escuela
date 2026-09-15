@@ -22,7 +22,7 @@ function gradoBase(nombre: string): string {
 }
 
 async function buildPayload() {
-  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque, config] =
+  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque, materiasEspacios, espacios, config] =
     await Promise.all([
       prisma.seccion.findMany({ orderBy: { id: "asc" } }),
       prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
@@ -41,6 +41,8 @@ async function buildPayload() {
         include: { materias: true },
       }),
       prisma.materiaMismoBloque.findMany(),
+      prisma.materiaEspacio.findMany(),
+      prisma.espacio.findMany({}),
       prisma.configuracion.findUnique({ where: { clave: "bloquesColaborativa" } }),
     ]);
 
@@ -133,6 +135,8 @@ async function buildPayload() {
     materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId, cursoId }) => ({ materiaAId, materiaBId, cursoId })),
     diasSinPEPorSeccion,
     paresPEMismoDia,
+    espacios: espacios.map(({ id, nombre }) => ({ id, nombre })),
+    materiasEspacios: materiasEspacios.map(({ espacioId, materiaId, seccionId }) => ({ espacioId, materiaId, seccionId })),
     colaborativas,
     bloquesColaborativa: Number(config?.valor) || 2,
   };
