@@ -46,6 +46,12 @@ interface Colaborativa {
   materiaIds: number[];
 }
 
+interface ParMismoBloque {
+  materiaAId: number;
+  materiaBId: number;
+  cursoId: number | null;
+}
+
 interface SeccionInfo {
   id: number;
   nombre: string;
@@ -59,6 +65,7 @@ export interface PayloadParaDiagnostico {
   deportes: Deporte[];
   reunionesSeccion: Reunion[];
   colaborativas: Colaborativa[];
+  materiasMismoBloque?: ParMismoBloque[];
   secciones: SeccionInfo[];
 }
 
@@ -109,11 +116,38 @@ function contarSlotsEmpaquetados(porDia: Map<number, { inicioMin: number; finMin
   return total;
 }
 
+function ahorroParesCurso(
+  cargasCurso: Carga[],
+  pares: ParMismoBloque[] | undefined,
+  cursoId: number
+): number {
+  if (!pares || pares.length === 0) return 0;
+  const reqPorMateria = new Map<number, number>();
+  for (const c of cargasCurso) {
+    reqPorMateria.set(c.materiaId, (reqPorMateria.get(c.materiaId) ?? 0) + c.bloquesSemanalesRequeridos);
+  }
+  const vistos = new Set<string>();
+  let ahorro = 0;
+  for (const p of pares) {
+    if (p.cursoId !== null && p.cursoId !== cursoId) continue;
+    const a = p.materiaAId;
+    const b = p.materiaBId;
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    if (vistos.has(key)) continue;
+    vistos.add(key);
+    const ra = reqPorMateria.get(a);
+    const rb = reqPorMateria.get(b);
+    if (ra === undefined || rb === undefined) continue;
+    ahorro += Math.min(ra, rb);
+  }
+  return ahorro;
+}
+
 export function diagnosticarInviabilidad(
   payload: PayloadParaDiagnostico,
   nombreDepto?: Map<number, string>
 ): DiagnosticoResultado {
-  const { bloques, cursos, cargas, profesores, deportes, reunionesSeccion, colaborativas, secciones = [] } = payload;
+  const { bloques, cursos, cargas, profesores, deportes, reunionesSeccion, colaborativas, materiasMismoBloque = [], secciones = [] } = payload;
   const causas: string[] = [];
   const sugerencias: string[] = [];
 
@@ -125,13 +159,17 @@ export function diagnosticarInviabilidad(
   for (const curso of cursos) {
     const cargasCurso = cargas.filter((c) => c.cursoId === curso.id);
     if (cargasCurso.length === 0) continue;
-    const requeridos = cargasCurso.reduce((acc, c) => acc + c.bloquesSemanalesRequeridos, 0);
+    const bruto = cargasCurso.reduce((acc, c) => acc + c.bloquesSemanalesRequeridos, 0);
+    const ahorro = ahorroParesCurso(cargasCurso, materiasMismoBloque, curso.id);
+    const requeridos = bruto - ahorro;
     const disponibles = disponiblesCurso(curso.seccionId);
     if (requeridos <= disponibles) continue;
     const falta = requeridos - disponibles;
 
     causas.push(
-      `Curso '${curso.nombre}': necesita ${requeridos} bloques semanales pero su sección '${nombreSeccion(
+      `Curso '${curso.nombre}': necesita ${requeridos} bloques semanales${
+        ahorro > 0 ? ` (tras compartir ${ahorro} con materias de par) ` : " "
+      }pero su sección '${nombreSeccion(
         secciones,
         curso.seccionId
       )}' solo ofrece ${disponibles} libres (descontando deportes y reuniones de sección). Faltan ${falta}.`

@@ -8,7 +8,8 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
-import type { BloqueHorario, DiaSemana, Seccion } from "../lib/types";
+import CabeceraGrilla, { columnasGrilla } from "../components/CabeceraGrilla";
+import type { BloqueHorario, DiaSemana, Reglas, Seccion } from "../lib/types";
 
 type FormState = { seccionId: string; dias: number[]; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico: boolean };
 
@@ -17,6 +18,15 @@ type FilaImportar = { seccion: string; dia: string; numeroPeriodo: string; horaI
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 
 const EMPTY: FormState = { seccionId: "", dias: [], numeroPeriodo: "", horaInicio: "", horaFin: "", esAcademico: true };
+
+function toMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function hhmm(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
 
 export default function Bloques() {
   const qc = useQueryClient();
@@ -41,20 +51,73 @@ export default function Bloques() {
   const { data: secciones = [] } = useQuery({ queryKey: ["secciones"], queryFn: () => api.get<Seccion[]>("/secciones") });
   const { data: dias = [] } = useQuery({ queryKey: ["dias"], queryFn: () => api.get<DiaSemana[]>("/dias") });
   const { data: bloquesTodos = [] } = useQuery({ queryKey: ["bloques-form"], queryFn: () => api.get<BloqueHorario[]>("/bloques") });
+  const { data: reglas } = useQuery({ queryKey: ["reglas"], queryFn: () => api.get<Reglas>("/reglas") });
+
+  const diasPorNumero = useMemo(() => {
+    const m = new Map<number, boolean>();
+    for (const d of dias) m.set(d.numeroDia, d.esHorarioEspecial);
+    return m;
+  }, [dias]);
+  const diasIdToNum = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const d of dias) m.set(d.id, d.numeroDia);
+    return m;
+  }, [dias]);
 
   const seccionId = fSeccion ? Number(fSeccion) : null;
   const seccionActual = useMemo(() => secciones.find((s) => s.id === seccionId), [secciones, seccionId]);
 
   const grid = useMemo(() => {
     if (!seccionId) return null;
-    const secBloques = bloques
-      .filter((b) => b.seccionId === seccionId)
-      .sort((a, b) => (a.horaInicio < b.horaInicio ? -1 : 1));
-    const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values());
+    const secBloques = bloques.filter((b) => b.seccionId === seccionId);
+    const ordenKey = new Map<string, number>();
+    const ordenFb = new Map<string, number>();
+    for (const b of secBloques) {
+      const nd = diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId;
+      const t = toMinutes(b.horaInicio);
+      if (!(diasPorNumero.get(nd) ?? false) && !ordenKey.has(b.numeroPeriodo)) ordenKey.set(b.numeroPeriodo, t);
+      if (!ordenFb.has(b.numeroPeriodo)) ordenFb.set(b.numeroPeriodo, t);
+    }
+    const clave = (p: string) => ordenKey.get(p) ?? ordenFb.get(p) ?? 0;
+    const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values()).sort(
+      (a, b) => clave(a.numeroPeriodo) - clave(b.numeroPeriodo)
+    );
     const cells: Record<string, BloqueHorario | undefined> = {};
-    for (const b of secBloques) cells[`${b.diaSemanaId}-${b.numeroPeriodo}`] = b;
+    for (const b of secBloques) cells[`${diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId}-${b.numeroPeriodo}`] = b;
     return { periods, cells };
-  }, [seccionId, bloques]);
+  }, [seccionId, bloques, diasPorNumero, diasIdToNum]);
+
+  const resumenFranjas = useMemo(() => {
+    if (!seccionId) return null;
+    const secAcad = bloques.filter((b) => b.seccionId === seccionId && b.esAcademico);
+    const numDe = (b: BloqueHorario) => diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId;
+    const esEsp = (b: BloqueHorario) => diasPorNumero.get(numDe(b)) ?? false;
+    const resumen = (pred: (b: BloqueHorario) => boolean) => {
+      const arr = secAcad.filter(pred);
+      if (arr.length === 0) return null;
+      const inicios = arr.map((b) => toMinutes(b.horaInicio));
+      const fines = arr.map((b) => toMinutes(b.horaFin));
+      const nds = Array.from(new Set(arr.map(numDe))).sort((a, b) => a - b);
+      return { n: arr.length, inicio: hhmm(Math.min(...inicios)), fin: hhmm(Math.max(...fines)), nds };
+    };
+    const regular = resumen((b) => !esEsp(b));
+    const viernes = resumen((b) => esEsp(b));
+    const reservados = secAcad.filter((b) => {
+      if (reglas?.deportes.some((d) => d.seccionId === seccionId && d.diaSemanaId === b.diaSemanaId && d.numeroPeriodo === b.numeroPeriodo)) return true;
+      if (
+        reglas?.reunionesSeccion.some(
+          (r) =>
+            r.secciones.some((s) => s.id === seccionId) &&
+            toMinutes(b.horaInicio) < toMinutes(r.horaFin) &&
+            toMinutes(r.horaInicio) < toMinutes(b.horaFin),
+        )
+      ) {
+        return true;
+      }
+      return false;
+    }).length;
+    return { regular, viernes, reservados };
+  }, [seccionId, bloques, reglas, diasIdToNum, diasPorNumero]);
 
   const [editing, setEditing] = useState<BloqueHorario | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -354,56 +417,70 @@ export default function Bloques() {
               Sección: {seccionActual?.nombre}
             </span>
           </div>
+          {resumenFranjas && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600">
+              {resumenFranjas.regular && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" />
+                  <span className="font-medium text-slate-800">Lun–Jue:</span>
+                  {resumenFranjas.regular.n} períodos ({resumenFranjas.regular.inicio}–{resumenFranjas.regular.fin})
+                </span>
+              )}
+              {resumenFranjas.viernes && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />
+                  <span className="font-medium text-slate-800">Viernes (especial):</span>
+                  {resumenFranjas.viernes.n} períodos ({resumenFranjas.viernes.inicio}–{resumenFranjas.viernes.fin})
+                </span>
+              )}
+              <span className="inline-flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-sm bg-slate-400" />
+                <span className="font-medium text-slate-800">Reservados:</span>
+                {resumenFranjas.reservados} bloques (deportes y reunión de sección)
+              </span>
+            </div>
+          )}
           {grid && grid.periods.length > 0 ? (
             <div className="overflow-x-auto p-4">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-slate-600">Período</th>
-                    {DIAS.map((d) => (
-                      <th key={d} className="px-4 py-3 text-left font-medium text-slate-600">
-                        {d}
-                        {d === "Viernes" && <span className="ml-1 text-xs text-amber-600">(esp.)</span>}
-                      </th>
-                    ))}
-                  </tr>
+                <thead>
+                  <CabeceraGrilla labelColumna="Período" columnas={columnasGrilla(diasPorNumero, DIAS)} />
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {grid.periods.map((p) => (
                     <tr key={p.numeroPeriodo}>
-                      <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                      <td className="px-4 py-2 whitespace-nowrap">
                         <span className="font-medium text-slate-800">{p.numeroPeriodo}</span>
-                        <span className="ml-2 text-xs text-slate-400">
-                          {p.horaInicio}-{p.horaFin}
-                        </span>
                       </td>
-                      {DIAS.map((_, i) => {
-                        const cell = grid.cells[`${i + 1}-${p.numeroPeriodo}`];
-                        return (
-                          <td key={i} className="px-3 py-2">
-                            {cell ? (
-                              cell.esAcademico ? (
-                                <div className="rounded-lg bg-indigo-50 px-3 py-2">
-                                  <p className="font-semibold text-indigo-800">{cell.numeroPeriodo}</p>
-                                  <p className="text-xs text-indigo-600">
-                                    {cell.horaInicio}-{cell.horaFin} · Académico
-                                  </p>
-                                </div>
+                        {DIAS.map((_, i2) => {
+                          const idx = i2 + 1;
+                          const cell = grid.cells[`${idx}-${p.numeroPeriodo}`];
+                          const esEspecialDia = diasPorNumero.get(idx) ?? false;
+                          return (
+                            <td key={idx} className={`px-3 py-2 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                              {cell ? (
+                                cell.esAcademico ? (
+                                  <div className="rounded-lg bg-indigo-50 px-3 py-2">
+                                    <p className="font-semibold text-indigo-800">{cell.numeroPeriodo}</p>
+                                    <p className="text-xs text-indigo-600">
+                                      {cell.horaInicio}-{cell.horaFin} · Académico
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="rounded-lg bg-amber-50 px-3 py-2">
+                                    <p className="font-semibold text-amber-700">{cell.numeroPeriodo}</p>
+                                    <p className="text-xs text-amber-600">
+                                      {cell.horaInicio}-{cell.horaFin} · Recreo
+                                    </p>
+                                  </div>
+                                )
                               ) : (
-                                <div className="rounded-lg bg-amber-50 px-3 py-2">
-                                  <p className="font-semibold text-amber-700">{cell.numeroPeriodo}</p>
-                                  <p className="text-xs text-amber-600">
-                                    {cell.horaInicio}-{cell.horaFin} · Recreo
-                                  </p>
-                                </div>
-                              )
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
                   ))}
                 </tbody>
               </table>
