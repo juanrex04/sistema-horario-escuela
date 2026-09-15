@@ -71,6 +71,7 @@ model Curso {
   seccionId Int
   nombre    String
   cargas    CargaAcademica[]
+  mismoBloque MateriaMismoBloque[]
 
   @@unique([seccionId, nombre])
 }
@@ -91,8 +92,10 @@ model MateriaMismoBloque {
   materiaA   Materia @relation("MateriaMismoBloqueA", fields: [materiaAId], references: [id], onDelete: Cascade)
   materiaBId Int
   materiaB   Materia @relation("MateriaMismoBloqueB", fields: [materiaBId], references: [id], onDelete: Cascade)
+  cursoId    Int?
+  curso      Curso?  @relation(fields: [cursoId], references: [id], onDelete: Cascade)
 
-  @@unique([materiaAId, materiaBId])
+  @@unique([materiaAId, materiaBId, cursoId])
 }
 
 model Departamento {

@@ -159,12 +159,22 @@ def solve(req: SolveRequest) -> SolveResponse:
 
     # Pares de materias que comparten bloque (p. ej. Música y Expresión Corporal:
     # en el mismo bloque el alumno elige a cuál asistir). Normalizados (min, max).
-    pares_mismo_bloque: set[tuple[int, int]] = {
-        tuple(sorted((p.materia_a_id, p.materia_b_id)))
-        for p in req.materias_mismo_bloque
-    }
+    # Un par puede acotarse a un curso (grado): solo aplica en ese curso; sin cursoId,
+    # aplica en todos los cursos donde coexistan ambas materias (global).
+    pares_globales: set[tuple[int, int]] = set()
+    pares_por_curso: dict[int, set[tuple[int, int]]] = {}
+    for p in req.materias_mismo_bloque:
+        t = tuple(sorted((p.materia_a_id, p.materia_b_id)))
+        if p.curso_id is None:
+            pares_globales.add(t)
+        else:
+            pares_por_curso.setdefault(p.curso_id, set()).add(t)
 
-    # carga_ids que pertenecen a algún par configurado (materias distintas = cargas distintas)
+    def _pares_de_curso(curso_id: int) -> set[tuple[int, int]]:
+        return pares_globales | pares_por_curso.get(curso_id, set())
+
+    # carga_ids que pertenecen a algún par configurado EN SU CURSO
+    # (materias distintas = cargas distintas)
     cargas_en_par: dict[tuple[int, int], set[int]] = {}
     cargas_por_materia_en_curso: dict[int, dict[int, list[int]]] = {}
     for carga in req.cargas:
@@ -173,8 +183,8 @@ def solve(req: SolveRequest) -> SolveResponse:
         )
         cargas_par_en_curso.setdefault(carga.materia_id, []).append(carga.id)
 
-    for (a, b) in pares_mismo_bloque:
-        for curso_id, por_materia in cargas_por_materia_en_curso.items():
+    for curso_id, por_materia in cargas_por_materia_en_curso.items():
+        for (a, b) in _pares_de_curso(curso_id):
             cargas_a = por_materia.get(a, [])
             cargas_b = por_materia.get(b, [])
             if not cargas_a or not cargas_b:
@@ -200,8 +210,8 @@ def solve(req: SolveRequest) -> SolveResponse:
 
     # 2b. Pares de materias que comparten bloque: por cada curso donde coexistan las
     #     cargas de ambas materias, ocupan exactamente los mismos bloques.
-    for (a, b) in pares_mismo_bloque:
-        for curso_id, por_materia in cargas_por_materia_en_curso.items():
+    for curso_id, por_materia in cargas_por_materia_en_curso.items():
+        for (a, b) in _pares_de_curso(curso_id):
             cargas_a = por_materia.get(a, [])
             cargas_b = por_materia.get(b, [])
             if not cargas_a or not cargas_b:

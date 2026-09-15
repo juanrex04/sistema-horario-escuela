@@ -605,4 +605,40 @@ deptos23 = {c.departamento_id for c in result23.colaborativas}
 assert deptos23 == {1}, f"solo el depto ADSCRITO del docente agenda reunión, no el de las materias que dicta: {deptos23}"
 print(f"[23] colaborativa por adscripción del docente (deptos agendados: {sorted(deptos23)}) OK")
 
+# 24. Par "mismo bloque" ACOTADO a un curso: Filosofía/Social Science solo comparten
+#     bloque en el curso 1; en el curso 2 las mismas materias NO deben compartir.
+payload24 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1"), Seccion(id=2, nombre="Sec2")],
+    dias=DIAS,
+    bloques=bloques_simples(n_sec=2),
+    profesores=[
+        Profesor(id=1, nombre="Prof1", seccionBaseId=1),
+        Profesor(id=2, nombre="Prof2", seccionBaseId=1),
+        Profesor(id=3, nombre="Prof3", seccionBaseId=2),
+        Profesor(id=4, nombre="Prof4", seccionBaseId=2),
+    ],
+    cursos=[Curso(id=1, nombre="C1", seccionId=1), Curso(id=2, nombre="C2", seccionId=2)],
+    materias=[
+        Materia(id=1, nombre="Filosofía"),
+        Materia(id=2, nombre="Social Science"),
+    ],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=1, materiaId=2, profesorId=2, bloquesSemanalesRequeridos=2),
+        Carga(id=3, cursoId=2, materiaId=1, profesorId=3, bloquesSemanalesRequeridos=2),
+        Carga(id=4, cursoId=2, materiaId=2, profesorId=4, bloquesSemanalesRequeridos=2),
+    ],
+    materiasMismoBloque=[MateriaMismoBloque(materiaAId=1, materiaBId=2, cursoId=1)],
+)
+result24 = solve(payload24)
+assert result24.status == "OPTIMAL", result24.status
+assert result24.num_asignaciones == 8, result24.num_asignaciones
+c1_a = {a.bloque_horario_id for a in result24.asignaciones if a.carga_academica_id == 1}
+c1_b = {a.bloque_horario_id for a in result24.asignaciones if a.carga_academica_id == 2}
+c2_a = {a.bloque_horario_id for a in result24.asignaciones if a.carga_academica_id == 3}
+c2_b = {a.bloque_horario_id for a in result24.asignaciones if a.carga_academica_id == 4}
+assert c1_a == c1_b, f"en el curso 1 deben compartir bloque: {c1_a} vs {c1_b}"
+assert c2_a.isdisjoint(c2_b), f"en el curso 2 NO deben compartir: {c2_a} vs {c2_b}"
+print(f"[24] par acotado a curso 1 (comparte: {sorted(c1_a)}, curso 2 disjunto: {sorted(c2_a)}/{sorted(c2_b)}) OK")
+
 print("OK")

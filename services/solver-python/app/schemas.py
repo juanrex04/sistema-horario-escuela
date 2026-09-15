@@ -91,6 +91,7 @@ class ColaborativaEntrada(BaseModel):
 class MateriaMismoBloque(BaseModel):
     materia_a_id: int = Field(alias="materiaAId")
     materia_b_id: int = Field(alias="materiaBId")
+    curso_id: int | None = Field(default=None, alias="cursoId")
 
     model_config = {"populate_by_name": True}
 

@@ -32,6 +32,7 @@ const materiaMismoBloqueSchema = z
   .object({
     materiaAId: z.number().int().positive(),
     materiaBId: z.number().int().positive(),
+    cursoId: z.number().int().positive().nullish(),
   })
   .refine((p) => p.materiaAId !== p.materiaBId, {
     path: ["materiaBId"],
@@ -45,18 +46,33 @@ const reglasSchema = z.object({
   bloquesColaborativa: z.number().int().min(1).max(4).optional(),
 });
 
-function normalizarPares(pares: { materiaAId: number; materiaBId: number }[]) {
+function normalizarPares(pares: { materiaAId: number; materiaBId: number; cursoId?: number | null }[]) {
   const vistos = new Set<string>();
-  const unicos: { materiaAId: number; materiaBId: number }[] = [];
+  const unicos: { materiaAId: number; materiaBId: number; cursoId: number | null }[] = [];
   for (const p of pares) {
     const [a, b] = p.materiaAId < p.materiaBId ? [p.materiaAId, p.materiaBId] : [p.materiaBId, p.materiaAId];
-    const k = `${a}_${b}`;
+    const k = `${p.cursoId ?? 0}_${a}_${b}`;
     if (!vistos.has(k)) {
       vistos.add(k);
-      unicos.push({ materiaAId: a, materiaBId: b });
+      unicos.push({ materiaAId: a, materiaBId: b, cursoId: p.cursoId ?? null });
     }
   }
   return unicos;
+}
+
+function paresEnConflicto(pares: { materiaAId: number; materiaBId: number; cursoId: number | null }[]) {
+  const porPar = new Map<string, boolean>();
+  for (const p of pares) {
+    const [a, b] = p.materiaAId < p.materiaBId ? [p.materiaAId, p.materiaBId] : [p.materiaBId, p.materiaAId];
+    const k = `${a}_${b}`;
+    const global = p.cursoId === null;
+    const previo = porPar.get(k);
+    if (previo !== undefined && previo !== global) {
+      return true;
+    }
+    porPar.set(k, global);
+  }
+  return false;
 }
 
 const BLOQUES_COLABORATIVA_KEY = "bloquesColaborativa";
@@ -72,7 +88,11 @@ async function getSnapshot() {
       orderBy: [{ seccionId: "asc" }, { diaSemanaId: "asc" }],
     }),
     prisma.materiaMismoBloque.findMany({
-      include: { materiaA: { select: { id: true, nombre: true } }, materiaB: { select: { id: true, nombre: true } } },
+      include: {
+        materiaA: { select: { id: true, nombre: true } },
+        materiaB: { select: { id: true, nombre: true } },
+        curso: { select: { id: true, nombre: true } },
+      },
       orderBy: [{ materiaAId: "asc" }, { materiaBId: "asc" }],
     }),
     prisma.configuracion.findUnique({ where: { clave: BLOQUES_COLABORATIVA_KEY } }),
@@ -92,9 +112,10 @@ router.put("/reglas", async (req, res) => {
   }
   const { reunionesSeccion, deportes, materiasMismoBloque, bloquesColaborativa } = parsed.data;
 
-  const [secciones, dias] = await Promise.all([
+  const [secciones, dias, cursos] = await Promise.all([
     prisma.seccion.findMany({ select: { id: true, nombre: true } }),
     prisma.diaSemana.findMany({ select: { id: true, numeroDia: true } }),
+    prisma.curso.findMany({ select: { id: true, nombre: true } }),
   ]);
   const nombreSeccion = (id: number) => secciones.find((s) => s.id === id)?.nombre ?? `sección ${id}`;
   const nombreDia = (id: number) => dias.find((d) => d.id === id)?.numeroDia ?? id;
@@ -114,6 +135,15 @@ router.put("/reglas", async (req, res) => {
       });
       return;
     }
+  }
+
+  const paresNormalizados = normalizarPares(materiasMismoBloque);
+  if (paresEnConflicto(paresNormalizados)) {
+    res.status(400).json({
+      error:
+        "El mismo par de materias no puede configurarse a la vez para todos los grados y para un grado específico.",
+    });
+    return;
   }
 
   try {
@@ -141,9 +171,9 @@ router.put("/reglas", async (req, res) => {
           },
         });
       }
-      for (const p of normalizarPares(materiasMismoBloque)) {
+      for (const p of paresNormalizados) {
         await tx.materiaMismoBloque.create({
-          data: { materiaAId: p.materiaAId, materiaBId: p.materiaBId },
+          data: { materiaAId: p.materiaAId, materiaBId: p.materiaBId, cursoId: p.cursoId },
         });
       }
       if (bloquesColaborativa !== undefined) {

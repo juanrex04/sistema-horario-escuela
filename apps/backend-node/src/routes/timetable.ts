@@ -84,14 +84,14 @@ async function buildPayload() {
       diaSemanaId: d.diaSemanaId,
       numeroPeriodo: d.numeroPeriodo,
     })),
-    materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId }) => ({ materiaAId, materiaBId })),
+    materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId, cursoId }) => ({ materiaAId, materiaBId, cursoId })),
     colaborativas,
     bloquesColaborativa: Number(config?.valor) || 2,
   };
 }
 
 function validarParesMismoBloque(
-  pares: { materiaAId: number; materiaBId: number }[],
+  pares: { materiaAId: number; materiaBId: number; cursoId: number | null }[],
   materias: { id: number; nombre: string }[],
   cursos: { id: number; nombre: string }[],
   cargas: { id: number; cursoId: number; materiaId: number; bloquesSemanalesRequeridos: number }[]
@@ -99,19 +99,27 @@ function validarParesMismoBloque(
   const nombreMateria = (id: number) => materias.find((m) => m.id === id)?.nombre ?? `materia ${id}`;
   const nombreCurso = (id: number) => cursos.find((c) => c.id === id)?.nombre ?? `curso ${id}`;
 
-  for (const par of pares) {
-    const cargasA = cargas.filter((c) => c.materiaId === par.materiaAId);
-    const cargasB = cargas.filter((c) => c.materiaId === par.materiaBId);
-    const porCurso = new Map<number, [number, number]>();
-    for (const ca of cargasA) {
-      const cb = cargasB.find((c) => c.cursoId === ca.cursoId);
-      if (cb && ca.bloquesSemanalesRequeridos !== cb.bloquesSemanalesRequeridos) {
-        porCurso.set(ca.cursoId, [ca.bloquesSemanalesRequeridos, cb.bloquesSemanalesRequeridos]);
-      }
+  const porCurso = new Map<number, [number, number][]>();
+  for (const p of pares) {
+    const par: [number, number] = p.materiaAId < p.materiaBId ? [p.materiaAId, p.materiaBId] : [p.materiaBId, p.materiaAId];
+    const destinos = p.cursoId === null ? cursos.map((c) => c.id) : [p.cursoId];
+    for (const cursoId of destinos) {
+      const arr = porCurso.get(cursoId) ?? [];
+      arr.push(par);
+      porCurso.set(cursoId, arr);
     }
-    for (const [cursoId, [ba, bb]] of porCurso) {
-      const error = `Las materias '${nombreMateria(par.materiaAId)}' y '${nombreMateria(par.materiaBId)}' requieren bloques semanales distintos en el curso '${nombreCurso(cursoId)}' (${ba} vs ${bb}). Deben coincidir para compartir el mismo bloque.`;
-      return error;
+  }
+  for (const [cursoId, paresDelCurso] of porCurso) {
+    for (const [a, b] of paresDelCurso) {
+      const cargasA = cargas.filter((c) => c.cursoId === cursoId && c.materiaId === a);
+      const cargasB = cargas.filter((c) => c.cursoId === cursoId && c.materiaId === b);
+      if (cargasA.length === 0 || cargasB.length === 0) continue;
+      const ba = cargasA[0].bloquesSemanalesRequeridos;
+      const bb = cargasB[0].bloquesSemanalesRequeridos;
+      if (ba !== bb) {
+        const error = `Las materias '${nombreMateria(a)}' y '${nombreMateria(b)}' requieren bloques semanales distintos en el curso '${nombreCurso(cursoId)}' (${ba} vs ${bb}). Deben coincidir para compartir el mismo bloque.`;
+        return error;
+      }
     }
   }
   return null;

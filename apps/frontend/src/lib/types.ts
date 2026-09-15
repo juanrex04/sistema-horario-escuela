@@ -48,8 +48,10 @@ export type Materia = {
 export type ParMateriasMismoBloque = {
   materiaAId: number;
   materiaBId: number;
+  cursoId?: number | null;
   materiaA?: { id: number; nombre: string };
   materiaB?: { id: number; nombre: string };
+  curso?: { id: number; nombre: string } | null;
 };
 export type ReunionSeccion = {
   id: number;

@@ -7,6 +7,7 @@ import { TextField, SelectField } from "../components/fields";
 import Modal from "../components/Modal";
 import type {
   ColaborativaGenerada,
+  Curso,
   Departamento,
   DiaSemana,
   Materia,
@@ -21,10 +22,14 @@ const DIAS_CORTOS = ["Lun", "Mar", "Mié", "Jue", "Vie"];
 type ReunionDraft = { diaSemanaId: number; horaInicio: string; horaFin: string; seccionIds: number[] };
 type DeporteDraft = { seccionId: number; diaSemanaIds: number[]; numeroPeriodo: string };
 type DeporteFila = { seccionId: number; diaSemanaId: number; numeroPeriodo: string };
-type ParDraft = { materiaAId: number; materiaBId: number };
+type ParDraft = { materiaAId: number; materiaBId: number; cursoId: number | null };
 
 function parNormalizado(a: number, b: number) {
   return a < b ? `${a}_${b}` : `${b}_${a}`;
+}
+
+function parScope(p: ParDraft) {
+  return p.cursoId ?? null;
 }
 
 export default function Reglas() {
@@ -60,7 +65,7 @@ export default function Reglas() {
     }
     for (const e of agrupados.values()) e.diaSemanaIds.sort((a, b) => a - b);
     setDeportes(Array.from(agrupados.values()));
-    setPares(data.materiasMismoBloque.map((p) => ({ materiaAId: p.materiaAId, materiaBId: p.materiaBId })));
+    setPares(data.materiasMismoBloque.map((p) => ({ materiaAId: p.materiaAId, materiaBId: p.materiaBId, cursoId: p.cursoId ?? null })));
   };
 
   const { data: reglas, dataUpdatedAt, refetch: refetchReglas } = useQuery({
@@ -72,6 +77,7 @@ export default function Reglas() {
   const { data: bloques = [] } = useCatalogQuery<BloqueHorario[]>("bloques", "/bloques");
   const { data: departamentos = [] } = useCatalogQuery<Departamento[]>("departamentos", "/departamentos");
   const { data: materias = [] } = useCatalogQuery<Materia[]>("materias", "/materias");
+  const { data: cursos = [] } = useCatalogQuery<Curso[]>("cursos", "/cursos");
   const { data: colaborativas = [] } = useQuery({
     queryKey: ["colaborativas"],
     queryFn: () => api.get<ColaborativaGenerada[]>("/timetables/resultado/colaborativas"),
@@ -93,7 +99,7 @@ export default function Reglas() {
 
   const [parOpen, setParOpen] = useState(false);
   const [parIdx, setParIdx] = useState<number | null>(null);
-  const [pDraft, setPDraft] = useState<ParDraft>({ materiaAId: 0, materiaBId: 0 });
+  const [pDraft, setPDraft] = useState<ParDraft>({ materiaAId: 0, materiaBId: 0, cursoId: null });
 
   const toggle = useMutation({
     mutationFn: ({ id, reunionActiva }: { id: number; reunionActiva: boolean }) =>
@@ -216,10 +222,11 @@ export default function Reglas() {
   const periodoEditable = periodosDeSeccion(dDraft.seccionId);
 
   const nombreMateria = (id: number) => materias.find((m) => m.id === id)?.nombre ?? "?";
+  const nombreCurso = (id: number | null) => cursos.find((c) => c.id === id)?.nombre ?? "?";
 
   const openNuevoPar = () => {
     setParIdx(null);
-    setPDraft({ materiaAId: materias[0]?.id ?? 0, materiaBId: materias[1]?.id ?? 0 });
+    setPDraft({ materiaAId: materias[0]?.id ?? 0, materiaBId: materias[1]?.id ?? 0, cursoId: null });
     setParOpen(true);
   };
 
@@ -229,15 +236,16 @@ export default function Reglas() {
     setParOpen(true);
   };
 
+  const parYaExiste = (draft: ParDraft) =>
+    pares.some(
+      (p) =>
+        parNormalizado(p.materiaAId, p.materiaBId) === parNormalizado(draft.materiaAId, draft.materiaBId) &&
+        parScope(p) === parScope(draft)
+    );
+
   const guardarPar = () => {
     if (!pDraft.materiaAId || !pDraft.materiaBId || pDraft.materiaAId === pDraft.materiaBId) return;
-    if (
-      parIdx === null &&
-      pares.some(
-        (p) => parNormalizado(p.materiaAId, p.materiaBId) === parNormalizado(pDraft.materiaAId, pDraft.materiaBId)
-      )
-    )
-      return;
+    if (parIdx === null && parYaExiste(pDraft)) return;
     const drafts = [...pares];
     if (parIdx === null) drafts.push(pDraft);
     else drafts[parIdx] = pDraft;
@@ -517,8 +525,17 @@ export default function Reglas() {
                   <span className="text-violet-700">{nombreMateria(p.materiaAId)}</span>
                   <Shuffle className="mx-1.5 inline h-3.5 w-3.5 text-slate-400" />
                   <span className="text-teal-700">{nombreMateria(p.materiaBId)}</span>
+                  {p.cursoId != null && (
+                    <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      Solo en {nombreCurso(p.cursoId)}
+                    </span>
+                  )}
                 </p>
-                <p className="text-xs text-slate-500">Comparten el mismo bloque en cada curso (los estudiantes eligen).</p>
+                <p className="text-xs text-slate-500">
+                  {p.cursoId != null
+                    ? `Comparten el mismo bloque solo en ${nombreCurso(p.cursoId)} (los estudiantes eligen).`
+                    : "Comparten el mismo bloque en cada curso con ambas materias (los estudiantes eligen)."}
+                </p>
               </div>
               <div className="flex gap-1">
                 <button onClick={() => openEditarPar(i)} className="rounded p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-600">
@@ -770,8 +787,25 @@ export default function Reglas() {
               </option>
             ))}
           </SelectField>
+          <SelectField
+            label="Ámbito del bloque compartido"
+            value={pDraft.cursoId ?? ""}
+            emptyLabel=""
+            onChange={(e) =>
+              setPDraft({ ...pDraft, cursoId: e.target.value ? Number(e.target.value) : null })
+            }
+          >
+            <option value="">Todos los grados</option>
+            {cursos.map((c) => (
+              <option key={c.id} value={c.id}>
+                Solo en {c.nombre}
+              </option>
+            ))}
+          </SelectField>
           <p className="text-xs text-slate-400">
-            En cada curso donde ambas materias estén asignadas, ocuparán exactamente los mismos bloques semanales, de modo que el estudiante elija a cuál asistir.
+            {pDraft.cursoId != null
+              ? `En ${nombreCurso(pDraft.cursoId)}, ambas materias ocuparán exactamente los mismos bloques semanales para que el estudiante elija a cuál asistir. No afecta a los demás grados.`
+              : "En cada curso donde ambas materias estén asignadas, ocuparán exactamente los mismos bloques semanales, de modo que el estudiante elija a cuál asistir."}
           </p>
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={() => setParOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
@@ -779,15 +813,7 @@ export default function Reglas() {
             </button>
             <button
               onClick={guardarPar}
-              disabled={
-                !parValido ||
-                (parIdx === null &&
-                  pares.some(
-                    (p) =>
-                      parNormalizado(p.materiaAId, p.materiaBId) ===
-                      parNormalizado(pDraft.materiaAId, pDraft.materiaBId)
-                  ))
-              }
+              disabled={!parValido || (parIdx === null && parYaExiste(pDraft))}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               Guardar

@@ -13,11 +13,6 @@ interface Curso {
   seccionId: number;
 }
 
-interface Materia {
-  id: number;
-  nombre: string;
-}
-
 interface Carga {
   id: number;
   cursoId: number;
@@ -51,15 +46,20 @@ interface Colaborativa {
   materiaIds: number[];
 }
 
+interface SeccionInfo {
+  id: number;
+  nombre: string;
+}
+
 export interface PayloadParaDiagnostico {
   bloques: Bloque[];
   cursos: Curso[];
-  materias: Materia[];
   cargas: Carga[];
   profesores: Profesor[];
   deportes: Deporte[];
   reunionesSeccion: Reunion[];
   colaborativas: Colaborativa[];
+  secciones: SeccionInfo[];
 }
 
 export interface DiagnosticoResultado {
@@ -67,8 +67,8 @@ export interface DiagnosticoResultado {
   sugerencias: string[];
 }
 
-function nombreMateria(m: Materia[], id: number): string {
-  return m.find((x) => x.id === id)?.nombre ?? `materia ${id}`;
+function nombreSeccion(secciones: SeccionInfo[], id: number): string {
+  return secciones.find((s) => s.id === id)?.nombre ?? `sección ${id}`;
 }
 
 function solapaConReunion(
@@ -92,21 +92,19 @@ function bloqueLibreParaSeccion(
   return true;
 }
 
-function contarSlotsDistintos(porDia: Map<number, { inicioMin: number; finMin: number }[]>): number {
+function contarSlotsEmpaquetados(porDia: Map<number, { inicioMin: number; finMin: number }[]>): number {
   let total = 0;
   for (const intervalos of porDia.values()) {
-    intervalos.sort((a, b) => a.inicioMin - b.inicioMin);
-    let slots = 0;
+    const arr = [...intervalos].sort((a, b) => a.finMin - b.finMin || a.inicioMin - b.inicioMin);
+    let n = 0;
     let finActual = -1;
-    for (const iv of intervalos) {
-      if (iv.inicioMin < finActual) {
-        if (iv.finMin > finActual) finActual = iv.finMin;
-      } else {
-        slots++;
+    for (const iv of arr) {
+      if (iv.inicioMin >= finActual) {
+        n++;
         finActual = iv.finMin;
       }
     }
-    total += slots;
+    total += n;
   }
   return total;
 }
@@ -115,23 +113,34 @@ export function diagnosticarInviabilidad(
   payload: PayloadParaDiagnostico,
   nombreDepto?: Map<number, string>
 ): DiagnosticoResultado {
-  const { bloques, cursos, materias, cargas, profesores, deportes, reunionesSeccion, colaborativas } = payload;
+  const { bloques, cursos, cargas, profesores, deportes, reunionesSeccion, colaborativas, secciones = [] } = payload;
   const causas: string[] = [];
   const sugerencias: string[] = [];
 
   const disponiblesCurso = (seccionId: number) =>
     bloques.filter((b) => bloqueLibreParaSeccion(b, seccionId, deportes, reunionesSeccion)).length;
 
+  const deficitSeccion = new Map<number, { faltan: number; cursos: string[] }>();
+
   for (const curso of cursos) {
     const cargasCurso = cargas.filter((c) => c.cursoId === curso.id);
     if (cargasCurso.length === 0) continue;
     const requeridos = cargasCurso.reduce((acc, c) => acc + c.bloquesSemanalesRequeridos, 0);
     const disponibles = disponiblesCurso(curso.seccionId);
-    if (requeridos > disponibles) {
-      causas.push(
-        `Curso '${curso.nombre}': necesita ${requeridos} bloques semanales pero su sección solo ofrece ${disponibles} libres (descontando deportes y reuniones de sección). Faltan ${requeridos - disponibles}.`
-      );
-    }
+    if (requeridos <= disponibles) continue;
+    const falta = requeridos - disponibles;
+
+    causas.push(
+      `Curso '${curso.nombre}': necesita ${requeridos} bloques semanales pero su sección '${nombreSeccion(
+        secciones,
+        curso.seccionId
+      )}' solo ofrece ${disponibles} libres (descontando deportes y reuniones de sección). Faltan ${falta}.`
+    );
+
+    const ent = deficitSeccion.get(curso.seccionId) ?? { faltan: 0, cursos: [] };
+    ent.faltan = Math.max(ent.faltan, falta);
+    ent.cursos.push(curso.nombre);
+    deficitSeccion.set(curso.seccionId, ent);
   }
 
   for (const prof of profesores) {
@@ -150,30 +159,42 @@ export function diagnosticarInviabilidad(
           const fin = finPorDia.get(b.diaSemanaId);
           if (fin === undefined || b.finMin > fin) continue;
         }
-        const dia = porDia.get(b.diaSemanaId) ?? [];
-        dia.push({ inicioMin: b.inicioMin, finMin: b.finMin });
-        porDia.set(b.diaSemanaId, dia);
+        let arr = porDia.get(b.diaSemanaId);
+        if (!arr) {
+          arr = [];
+          porDia.set(b.diaSemanaId, arr);
+        }
+        arr.push({ inicioMin: b.inicioMin, finMin: b.finMin });
       }
     }
-    const disponibles = contarSlotsDistintos(porDia);
-    if (requeridos > disponibles) {
-      causas.push(
-        `Docente '${prof.nombre}': acumula ${requeridos} bloques de clase pero solo podría estar disponible en ${disponibles} bloques distintos${sinRestriccion ? "" : " con su jornada parcial"}. Reduce su carga o amplía su jornada.`
-      );
-    }
+    const disponibles = contarSlotsEmpaquetados(porDia);
+    if (requeridos <= disponibles) continue;
+    const falta = requeridos - disponibles;
+
+    causas.push(
+      `Docente '${prof.nombre}': acumula ${requeridos} bloques de clase pero solo podría estar disponible en ${disponibles} bloques distintos${
+        sinRestriccion ? "" : " con su jornada parcial"
+      }. Reduce su carga o amplía su jornada.`
+    );
+
+    sugerencias.push(
+      `Docente '${prof.nombre}': reasigna al menos ${falta} bloques a otro docente o amplía su jornada${
+        sinRestriccion ? "" : " parcial"
+      }.`
+    );
+  }
+
+  for (const [seccionId, ent] of deficitSeccion) {
+    sugerencias.push(
+      `La sección '${nombreSeccion(secciones, seccionId)}' requiere hasta ${ent.faltan} ${
+        ent.faltan === 1 ? "bloque adicional" : "bloques adicionales"
+      } en sus cursos (${ent.cursos.join(", ")}): agrega períodos académicos a su grilla o reduce los bloques semanales de esas materias.`
+    );
   }
 
   const hayCurso = causas.some((c) => c.startsWith("Curso"));
   const hayDocente = causas.some((c) => c.startsWith("Docente"));
 
-  if (hayCurso) {
-    sugerencias.push(
-      "Reduce los bloques semanales de alguna materia de esos cursos o libera franjas ocupadas por deportes y reuniones de sección."
-    );
-  }
-  if (hayDocente) {
-    sugerencias.push("Reduce la carga de esos docentes o amplía su jornada si son de tiempo parcial.");
-  }
   if (colaborativas.length > 0) {
     const nombres = colaborativas
       .map((c) => nombreDepto?.get(c.departamentoId) ?? `departamento ${c.departamentoId}`)
@@ -182,7 +203,7 @@ export function diagnosticarInviabilidad(
       `Con las reuniones colaborativas activas (${nombres}), considera reducir los bloques consecutivos en Reglas o liberar más franjas para poder encajarlas.`
     );
   }
-  if (sugerencias.length === 0) {
+  if (sugerencias.length === 0 && (hayCurso || hayDocente)) {
     sugerencias.push("Libera franjas ocupadas (deportes, reuniones de sección) o reduce los bloques semanales requeridos.");
   }
 
