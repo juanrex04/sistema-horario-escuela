@@ -672,6 +672,7 @@ router.delete("/cursos/:id", async (req, res) => {
 /* ---------------- Materias ---------------- */
 const materiaSchema = z.object({
   nombre: z.string().min(1),
+  esEducacionFisica: z.boolean().optional(),
   departamentoId: z.number().int().positive().nullable().optional(),
 });
 

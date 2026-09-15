@@ -13,6 +13,14 @@ function toMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function gradoBase(nombre: string): string {
+  const stripped = nombre.trim();
+  let i = stripped.length;
+  while (i > 0 && /[A-ZÁÉÍÓÚÜÑ]/.test(stripped[i - 1])) i -= 1;
+  if (i === stripped.length || i === 0) return stripped;
+  return stripped.slice(0, i).replace(/\s+$/, "");
+}
+
 async function buildPayload() {
   const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque, config] =
     await Promise.all([
@@ -40,6 +48,44 @@ async function buildPayload() {
     .filter((d) => d.materias.length > 0)
     .map((d) => ({ departamentoId: d.id, materiaIds: d.materias.map((m) => m.id) }));
 
+  const seccionPrimaria = secciones.find((s) => s.nombre === "Primaria");
+  const diasSinPEPorSeccion: { seccionId: number; diaSemanaIds: number[] }[] = [];
+  if (seccionPrimaria) {
+    const diasDeporte = new Set(
+      deportes.filter((d) => d.seccionId === seccionPrimaria.id).map((d) => d.diaSemanaId)
+    );
+    if (diasDeporte.size > 0) {
+      diasSinPEPorSeccion.push({ seccionId: seccionPrimaria.id, diaSemanaIds: [...diasDeporte] });
+    }
+  }
+
+  const esPE = new Map(materias.filter((m) => m.esEducacionFisica).map((m) => [m.id, true]));
+  const paresPEMismoDia: { cargaAId: number; cargaBId: number }[] = [];
+  if (seccionPrimaria) {
+    const porBase = new Map<
+      string,
+      { id: number; cursoId: number; materiaId: number; bloques: number }[]
+    >();
+    for (const c of cargas) {
+      if (!esPE.has(c.materiaId)) continue;
+      const curso = cursos.find((x) => x.id === c.cursoId);
+      if (!curso || curso.seccionId !== seccionPrimaria.id) continue;
+      const base = gradoBase(curso.nombre);
+      const arr = porBase.get(base) ?? [];
+      arr.push({ id: c.id, cursoId: c.cursoId, materiaId: c.materiaId, bloques: c.bloquesSemanalesRequeridos });
+      porBase.set(base, arr);
+    }
+    for (const [, cargasDelGrado] of porBase) {
+      if (cargasDelGrado.length !== 2) continue;
+      const [a, b] = cargasDelGrado;
+      if (a.bloques !== b.bloques) continue;
+      const par = a.id < b.id ? { cargaAId: a.id, cargaBId: b.id } : { cargaAId: b.id, cargaBId: a.id };
+      if (!paresPEMismoDia.some((p) => p.cargaAId === par.cargaAId && p.cargaBId === par.cargaBId)) {
+        paresPEMismoDia.push(par);
+      }
+    }
+  }
+
   return {
     secciones: secciones.map(({ id, nombre }) => ({ id, nombre })),
     dias: dias.map(({ id, numeroDia, esHorarioEspecial }) => ({ id, numeroDia, esHorarioEspecial })),
@@ -65,7 +111,7 @@ async function buildPayload() {
       })),
     })),
     cursos: cursos.map(({ id, nombre, seccionId }) => ({ id, nombre, seccionId })),
-    materias: materias.map(({ id, nombre }) => ({ id, nombre })),
+    materias: materias.map(({ id, nombre, esEducacionFisica }) => ({ id, nombre, esEducacionFisica })),
     cargas: cargas.map(({ id, cursoId, materiaId, profesorId, bloquesSemanalesRequeridos }) => ({
       id,
       cursoId,
@@ -85,6 +131,8 @@ async function buildPayload() {
       numeroPeriodo: d.numeroPeriodo,
     })),
     materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId, cursoId }) => ({ materiaAId, materiaBId, cursoId })),
+    diasSinPEPorSeccion,
+    paresPEMismoDia,
     colaborativas,
     bloquesColaborativa: Number(config?.valor) || 2,
   };

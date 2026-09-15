@@ -154,7 +154,9 @@ async function main() {
     "Biología", "Química", "Filosofía",
   ];
   for (const nombre of nombresMaterias) {
-    const m = await prisma.materia.create({ data: { nombre } });
+    const m = await prisma.materia.create({
+      data: { nombre, esEducacionFisica: nombre === "Educación Física" },
+    });
     materias[nombre] = m.id;
   }
 

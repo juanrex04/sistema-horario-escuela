@@ -2,6 +2,7 @@ from app.solver import solve, _overlap_times
 from app.schemas import (
     SolveRequest, Seccion, Dia, Bloque, Profesor, Curso, Materia, Carga,
     ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque, JornadaDia,
+    DiasSinPEPorSeccion, ParPEMismoDia,
 )
 
 DIAS = [
@@ -640,5 +641,112 @@ c2_b = {a.bloque_horario_id for a in result24.asignaciones if a.carga_academica_
 assert c1_a == c1_b, f"en el curso 1 deben compartir bloque: {c1_a} vs {c1_b}"
 assert c2_a.isdisjoint(c2_b), f"en el curso 2 NO deben compartir: {c2_a} vs {c2_b}"
 print(f"[24] par acotado a curso 1 (comparte: {sorted(c1_a)}, curso 2 disjunto: {sorted(c2_a)}/{sorted(c2_b)}) OK")
+
+# 25. Regla A: educación física NO puede caer en días de deporte de su sección.
+#     Sec 1 con 2 días x 4 bloques. Deportes día 1 período 1. PE materia con 2
+#     bloques: solo puede caer en día 2 (día 1 pierde 1 bloque por deportes, pero
+#     aún quedan 3; la regla prohíbe TODO el día completo, no solo el período).
+payload25 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="6A", seccionId=1)],
+    materias=[Materia(id=1, nombre="P.E", esEducacionFisica=True)],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="1")],
+    diasSinPEPorSeccion=[DiasSinPEPorSeccion(seccionId=1, diaSemanaIds=[1])],
+)
+result25 = solve(payload25)
+assert result25.status == "OPTIMAL", result25.status
+for a in result25.asignaciones:
+    b = next(x for x in payload25.bloques if x.id == a.bloque_horario_id)
+    assert b.dia_semana_id != 1, f"PE no puede caer en día de deportes: bloque {b.id} día {b.dia_semana_id}"
+print("[25] PE no cae en día de deportes (Regla A) OK")
+
+# 26. Regla A (INFEASIBLE): PE necesita 5 bloques, 2 días x 4 = 8, pero día 1
+#     está completamente prohibido para PE (deportes), quedan solo 4 disponibles
+#     → no alcanza → INFEASIBLE.
+payload26 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS,
+    bloques=bloques_2dias(),
+    profesores=[Profesor(id=1, nombre="P", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="6A", seccionId=1)],
+    materias=[Materia(id=1, nombre="P.E", esEducacionFisica=True)],
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=5)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="1")],
+    diasSinPEPorSeccion=[DiasSinPEPorSeccion(seccionId=1, diaSemanaIds=[1])],
+)
+result26 = solve(payload26)
+assert result26.status == "INFEASIBLE", result26.status
+print("[26] PE que necesita 5 bloques pero solo 4 disponibles (Regla A) -> INFEASIBLE OK")
+
+# 27. Regla B: par 6A/6B PE mismo día (profes distintos). 2 días x 4 bloques,
+#     ambos con 2 bloques de PE. Deben quedar en los MISMOS 2 días, máx. 1/bloque
+#     por día y por carga.
+bloques_3dias_r27 = []
+_i_r27 = 1
+for d in (1, 2, 3):
+    for p, ini, fin in ((1, 420, 480), (2, 480, 540), (3, 540, 600), (4, 600, 660)):
+        bloques_3dias_r27.append(Bloque(id=_i_r27, seccionId=1, diaSemanaId=d, numeroPeriodo=str(p),
+                                        inicioMin=ini, finMin=fin, esAcademico=True))
+        _i_r27 += 1
+payload27 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS + [Dia(id=3, numeroDia=3, esHorarioEspecial=False)],
+    bloques=bloques_3dias_r27,
+    profesores=[
+        Profesor(id=1, nombre="ProfA", seccionBaseId=1),
+        Profesor(id=2, nombre="ProfB", seccionBaseId=1),
+    ],
+    cursos=[Curso(id=1, nombre="6A", seccionId=1), Curso(id=2, nombre="6B", seccionId=1)],
+    materias=[Materia(id=1, nombre="P.E", esEducacionFisica=True)],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    diasSinPEPorSeccion=[],
+    paresPEMismoDia=[ParPEMismoDia(cargaAId=1, cargaBId=2)],
+)
+result27 = solve(payload27)
+assert result27.status in ("OPTIMAL", "FEASIBLE"), result27.status
+assert result27.num_asignaciones == 4, result27.num_asignaciones
+dias6a = {next(x for x in payload27.bloques if x.id == a.bloque_horario_id).dia_semana_id
+          for a in result27.asignaciones if a.carga_academica_id == 1}
+dias6b = {next(x for x in payload27.bloques if x.id == a.bloque_horario_id).dia_semana_id
+          for a in result27.asignaciones if a.carga_academica_id == 2}
+assert dias6a == dias6b, f"6A y 6B deben ver PE el mismo día: {dias6a} vs {dias6b}"
+print(f"[27] par 6A/6B mismo día (Regla B): 6A={sorted(dias6a)}, 6B={sorted(dias6b)} OK")
+
+# 28. Regla B + Regla A combinadas: 6A/6B mismo día + no en días de deportes.
+#     3 días x 4 bloques, deportes día 1. PE 2 bloques → solo puede ser días 2 y 3.
+payload28 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Sec1")],
+    dias=DIAS + [Dia(id=3, numeroDia=3, esHorarioEspecial=False)],
+    bloques=bloques_3dias_r27,
+    profesores=[
+        Profesor(id=1, nombre="ProfA", seccionBaseId=1),
+        Profesor(id=2, nombre="ProfB", seccionBaseId=1),
+    ],
+    cursos=[Curso(id=1, nombre="6A", seccionId=1), Curso(id=2, nombre="6B", seccionId=1)],
+    materias=[Materia(id=1, nombre="P.E", esEducacionFisica=True)],
+    cargas=[
+        Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2),
+        Carga(id=2, cursoId=2, materiaId=1, profesorId=2, bloquesSemanalesRequeridos=2),
+    ],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="1")],
+    diasSinPEPorSeccion=[DiasSinPEPorSeccion(seccionId=1, diaSemanaIds=[1])],
+    paresPEMismoDia=[ParPEMismoDia(cargaAId=1, cargaBId=2)],
+)
+result28 = solve(payload28)
+assert result28.status in ("OPTIMAL", "FEASIBLE"), result28.status
+dias6a_28 = {next(x for x in payload28.bloques if x.id == a.bloque_horario_id).dia_semana_id
+             for a in result28.asignaciones if a.carga_academica_id == 1}
+dias6b_28 = {next(x for x in payload28.bloques if x.id == a.bloque_horario_id).dia_semana_id
+             for a in result28.asignaciones if a.carga_academica_id == 2}
+assert dias6a_28 == dias6b_28, f"mismo día: {dias6a_28} vs {dias6b_28}"
+assert 1 not in dias6a_28, f"PE no puede caer en día 1 (deportes): {dias6a_28}"
+print(f"[28] 6A/6B mismo día sin deportes (A+B): {sorted(dias6a_28)} OK")
 
 print("OK")

@@ -75,6 +75,13 @@ def solve(req: SolveRequest) -> SolveResponse:
                 deporte_por_bloque[(d.seccion_id, d.dia_semana_id, d.numero_periodo)] = b_id
 
     prohibidas: dict[int, set[int]] = {}
+    materia_por_id = {m.id: m for m in req.materias}
+    pe_dias_por_seccion: dict[int, set[int]] = {}
+    for dias_bloqueados in req.dias_sin_pe_por_seccion:
+        pe_dias_por_seccion.setdefault(dias_bloqueados.seccion_id, set()).update(
+            dias_bloqueados.dia_semana_ids
+        )
+
     for carga in req.cargas:
         curso = curso_por_id[carga.curso_id]
 
@@ -84,6 +91,15 @@ def solve(req: SolveRequest) -> SolveResponse:
             b_id = deporte_por_bloque.get((dep.seccion_id, dep.dia_semana_id, dep.numero_periodo))
             if b_id is not None:
                 prohibidas.setdefault(carga.id, set()).add(b_id)
+
+        # Regla A: la educación física no cae en los días de deporte de su sección.
+        materia = materia_por_id.get(carga.materia_id)
+        if materia is not None and materia.es_educacion_fisica:
+            dias_pe = pe_dias_por_seccion.get(curso.seccion_id)
+            if dias_pe:
+                for b_id, b in academic_blocks.items():
+                    if b.seccion_id == curso.seccion_id and b.dia_semana_id in dias_pe:
+                        prohibidas.setdefault(carga.id, set()).add(b_id)
 
     profesor_base_por_id = {p.id: p.seccion_base_id for p in req.profesores}
 
@@ -222,6 +238,50 @@ def solve(req: SolveRequest) -> SolveResponse:
                         if b_id not in candidatos.get(cb, []):
                             continue
                         model.Add(variables[(ca, b_id)] == variables[(cb, b_id)])
+
+    # 2c. Pares de P.E en el mismo día (Regla B): las dos cargas del par ven la
+    #     materia exactamente los mismos días, con a lo sumo un bloque por día y
+    #     por carga. No se exige que los periodos sean consecutivos.
+    def _dias_por_carga(carga_id: int) -> dict[int, list[cp_model.IntVar]]:
+        por_dia: dict[int, list[cp_model.IntVar]] = {}
+        curso = curso_por_id[carga_por_id[carga_id].curso_id]
+        for b_id, b in academic_blocks.items():
+            if b.seccion_id != curso.seccion_id:
+                continue
+            var = variables.get((carga_id, b_id))
+            if var is not None:
+                por_dia.setdefault(b.dia_semana_id, []).append(var)
+        return por_dia
+
+    for par in req.pares_pe_mismo_dia:
+        ca, cb = par.carga_a_id, par.carga_b_id
+        if ca not in carga_por_id or cb not in carga_por_id:
+            continue
+        if curso_por_id[carga_por_id[ca].curso_id].seccion_id != curso_por_id[
+            carga_por_id[cb].curso_id
+        ].seccion_id:
+            continue
+        dias_a, dias_b = _dias_por_carga(ca), _dias_por_carga(cb)
+        n = carga_por_id[ca].bloques_semanales_requeridos
+        total_a: list[cp_model.IntVar] = []
+        for dia_id in set(dias_a) | set(dias_b):
+            vars_a = dias_a.get(dia_id, [])
+            vars_b = dias_b.get(dia_id, [])
+            if not vars_a and not vars_b:
+                continue
+            usa_a = model.NewBoolVar(f"PE_PRESA_{ca}_{dia_id}")
+            usa_b = model.NewBoolVar(f"PE_PRESB_{cb}_{dia_id}")
+            model.Add(usa_a <= sum(vars_a))
+            model.Add(sum(vars_a) <= len(vars_a) * usa_a)
+            model.Add(usa_b <= sum(vars_b))
+            model.Add(sum(vars_b) <= len(vars_b) * usa_b)
+            model.Add(usa_a == usa_b)
+            total_a.append(usa_a)
+            if vars_a:
+                model.Add(sum(vars_a) <= 1)
+            if vars_b:
+                model.Add(sum(vars_b) <= 1)
+        model.Add(sum(total_a) == n)
 
     # 3. No solapamiento docente (matriz de incompatibilidad temporal)
     cargas_por_profesor: dict[int, list[int]] = {}

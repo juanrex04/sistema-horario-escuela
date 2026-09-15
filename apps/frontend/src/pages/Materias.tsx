@@ -26,6 +26,7 @@ export default function Materias() {
 
   const [editing, setEditing] = useState<Materia | null>(null);
   const [nombre, setNombre] = useState("");
+  const [esEducacionFisica, setEsEducacionFisica] = useState(false);
   const [departamentoId, setDepartamentoId] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Materia | null>(null);
@@ -33,24 +34,26 @@ export default function Materias() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["materias-list"] });
 
   const create = useMutation({
-    mutationFn: (data: { nombre: string; departamentoId: number | null }) => api.post("/materias", data),
+    mutationFn: (data: { nombre: string; esEducacionFisica: boolean; departamentoId: number | null }) => api.post("/materias", data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setNombre("");
+      setEsEducacionFisica(false);
       setDepartamentoId("");
     },
   });
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { nombre: string; departamentoId: number | null } }) =>
+    mutationFn: ({ id, data }: { id: number; data: { nombre: string; esEducacionFisica: boolean; departamentoId: number | null } }) =>
       api.patch(`/materias/${id}`, data),
     onSuccess: () => {
       invalidate();
       setFormOpen(false);
       setEditing(null);
       setNombre("");
+      setEsEducacionFisica(false);
       setDepartamentoId("");
     },
   });
@@ -67,6 +70,7 @@ export default function Materias() {
   function openCreate() {
     setEditing(null);
     setNombre("");
+    setEsEducacionFisica(false);
     setDepartamentoId("");
     setFormOpen(true);
   }
@@ -74,6 +78,7 @@ export default function Materias() {
   function openEdit(m: Materia) {
     setEditing(m);
     setNombre(m.nombre);
+    setEsEducacionFisica(m.esEducacionFisica ?? false);
     setDepartamentoId(m.departamentoId ? String(m.departamentoId) : "");
     setFormOpen(true);
   }
@@ -87,6 +92,7 @@ export default function Materias() {
     e.preventDefault();
     const data = {
       nombre: nombre.trim(),
+      esEducacionFisica,
       departamentoId: departamentoId ? Number(departamentoId) : null,
     };
     if (editing) update.mutate({ id: editing.id, data });
@@ -147,7 +153,16 @@ export default function Materias() {
             )}
             {materias.map((m) => (
               <tr key={m.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">{m.nombre}</td>
+                <td className="px-4 py-3 font-medium text-slate-800">
+                  <div className="flex items-center gap-2">
+                    {m.nombre}
+                    {m.esEducacionFisica && (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        Educ. física
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-4 py-3">
                   {m.departamento ? (
                     <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
@@ -223,6 +238,15 @@ export default function Materias() {
               </option>
             ))}
           </SelectField>
+          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={esEducacionFisica}
+              onChange={(e) => setEsEducacionFisica(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            Educación física
+          </label>
           {(create.error || update.error) && (
             <p className="text-sm text-red-600">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}

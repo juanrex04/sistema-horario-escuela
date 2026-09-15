@@ -67,25 +67,10 @@ export default function Bloques() {
   const seccionId = fSeccion ? Number(fSeccion) : null;
   const seccionActual = useMemo(() => secciones.find((s) => s.id === seccionId), [secciones, seccionId]);
 
-  const grid = useMemo(() => {
-    if (!seccionId) return null;
-    const secBloques = bloques.filter((b) => b.seccionId === seccionId);
-    const ordenKey = new Map<string, number>();
-    const ordenFb = new Map<string, number>();
-    for (const b of secBloques) {
-      const nd = diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId;
-      const t = toMinutes(b.horaInicio);
-      if (!(diasPorNumero.get(nd) ?? false) && !ordenKey.has(b.numeroPeriodo)) ordenKey.set(b.numeroPeriodo, t);
-      if (!ordenFb.has(b.numeroPeriodo)) ordenFb.set(b.numeroPeriodo, t);
-    }
-    const clave = (p: string) => ordenKey.get(p) ?? ordenFb.get(p) ?? 0;
-    const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values()).sort(
-      (a, b) => clave(a.numeroPeriodo) - clave(b.numeroPeriodo)
-    );
-    const cells: Record<string, BloqueHorario | undefined> = {};
-    for (const b of secBloques) cells[`${diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId}-${b.numeroPeriodo}`] = b;
-    return { periods, cells };
-  }, [seccionId, bloques, diasPorNumero, diasIdToNum]);
+  const secBloques = useMemo(
+    () => (seccionId ? bloques.filter((b) => b.seccionId === seccionId) : []),
+    [seccionId, bloques]
+  );
 
   const resumenFranjas = useMemo(() => {
     if (!seccionId) return null;
@@ -440,48 +425,38 @@ export default function Bloques() {
               </span>
             </div>
           )}
-          {grid && grid.periods.length > 0 ? (
+          {secBloques.length > 0 ? (
             <div className="overflow-x-auto p-4">
               <table className="w-full text-sm">
                 <thead>
-                  <CabeceraGrilla labelColumna="Período" columnas={columnasGrilla(diasPorNumero, DIAS)} />
+                  <CabeceraGrilla labelColumna="" columnas={columnasGrilla(diasPorNumero, DIAS)} />
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {grid.periods.map((p) => (
-                    <tr key={p.numeroPeriodo}>
-                      <td className="px-4 py-2 whitespace-nowrap">
-                        <span className="font-medium text-slate-800">{p.numeroPeriodo}</span>
-                      </td>
-                        {DIAS.map((_, i2) => {
-                          const idx = i2 + 1;
-                          const cell = grid.cells[`${idx}-${p.numeroPeriodo}`];
-                          const esEspecialDia = diasPorNumero.get(idx) ?? false;
-                          return (
-                            <td key={idx} className={`px-3 py-2 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                              {cell ? (
-                                cell.esAcademico ? (
-                                  <div className="rounded-lg bg-indigo-50 px-3 py-2">
-                                    <p className="font-semibold text-indigo-800">{cell.numeroPeriodo}</p>
-                                    <p className="text-xs text-indigo-600">
-                                      {cell.horaInicio}-{cell.horaFin} · Académico
-                                    </p>
-                                  </div>
-                                ) : (
-                                  <div className="rounded-lg bg-amber-50 px-3 py-2">
-                                    <p className="font-semibold text-amber-700">{cell.numeroPeriodo}</p>
-                                    <p className="text-xs text-amber-600">
-                                      {cell.horaInicio}-{cell.horaFin} · Recreo
-                                    </p>
-                                  </div>
-                                )
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                  ))}
+                <tbody>
+                  <tr>
+                    <td className="w-10" />
+                    {DIAS.map((dia) => {
+                      const nd = DIAS.indexOf(dia) + 1;
+                      const esEspecialDia = diasPorNumero.get(nd) ?? false;
+                      const bloquesDia = secBloques
+                        .filter((b) => (diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId) === nd)
+                        .sort((a, b) => toMinutes(a.horaInicio) - toMinutes(b.horaInicio));
+                      return (
+                        <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                          <div className="space-y-1.5">
+                            {bloquesDia.length === 0 && <span className="text-xs text-slate-300">—</span>}
+                            {bloquesDia.map((b) => (
+                              <div key={b.id} className={`rounded-lg px-3 py-2 ${b.esAcademico ? "bg-indigo-50" : "bg-amber-50"}`}>
+                                <p className={`font-semibold ${b.esAcademico ? "text-indigo-800" : "text-amber-700"}`}>{b.numeroPeriodo}</p>
+                                <p className={`text-xs ${b.esAcademico ? "text-indigo-600" : "text-amber-600"}`}>
+                                  {b.horaInicio}-{b.horaFin} · {b.esAcademico ? "Académico" : "Recreo"}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
                 </tbody>
               </table>
             </div>

@@ -135,38 +135,24 @@ export default function Horario() {
   const curso = useMemo(() => cursos.find((c) => c.id === Number(cursoId)), [cursos, cursoId]);
   const seccionId = curso?.seccionId;
 
-  const grid = useMemo(() => {
-    if (!seccionId) return null;
-    const secBloques = bloques.filter((b) => b.seccionId === seccionId);
-    const ordenKey = new Map<string, number>();
-    const ordenFb = new Map<string, number>();
-    for (const b of secBloques) {
-      const nd = numeroDeDiaId(b.diaSemanaId);
-      const t = toMinutes(b.horaInicio);
-      if (!(diasPorNumero.get(nd) ?? false) && !ordenKey.has(b.numeroPeriodo)) ordenKey.set(b.numeroPeriodo, t);
-      if (!ordenFb.has(b.numeroPeriodo)) ordenFb.set(b.numeroPeriodo, t);
-    }
-    const clave = (p: string) => ordenKey.get(p) ?? ordenFb.get(p) ?? 0;
-    const periods = Array.from(new Map(secBloques.map((b) => [b.numeroPeriodo, b])).values()).sort(
-      (a, b) => clave(a.numeroPeriodo) - clave(b.numeroPeriodo)
-    );
-    const cells: Record<string, HorarioAsignado[]> = {};
-    for (const asig of resultado) {
-      if (asig.cargaAcademica.curso.id === Number(cursoId)) {
-        const nd = numeroDeDiaId(asig.bloqueHorario.diaSemanaId);
-        const key = `${nd}-${asig.bloqueHorario.numeroPeriodo}`;
-        (cells[key] ??= []).push(asig);
+  const cursoBloques = useMemo(
+    () => (seccionId ? bloques.filter((b) => b.seccionId === seccionId) : []),
+    [seccionId, bloques]
+  );
+  const cursoClases = useMemo(() => {
+    const m: Record<string, HorarioAsignado[]> = {};
+    for (const a of resultado) {
+      if (a.cargaAcademica.curso.id === Number(cursoId)) {
+        const nd = numeroDeDiaId(a.bloqueHorario.diaSemanaId);
+        const key = `${nd}-${a.bloqueHorario.numeroPeriodo}`;
+        (m[key] ??= []).push(a);
       }
     }
-    for (const arr of Object.values(cells)) {
-      arr.sort((a, b) =>
-        (a.cargaAcademica.materia?.nombre ?? "").localeCompare(b.cargaAcademica.materia?.nombre ?? "")
-      );
+    for (const arr of Object.values(m)) {
+      arr.sort((a, b) => (a.cargaAcademica.materia?.nombre ?? "").localeCompare(b.cargaAcademica.materia?.nombre ?? ""));
     }
-    const bloquesPorCelda: Record<string, BloqueHorario | undefined> = {};
-    for (const b of secBloques) bloquesPorCelda[`${numeroDeDiaId(b.diaSemanaId)}-${b.numeroPeriodo}`] = b;
-    return { periods, cells, bloquesPorCelda };
-  }, [seccionId, cursoId, bloques, resultado, diasById, diasPorNumero]);
+    return m;
+  }, [cursoId, resultado, diasById]);
 
   const resumenCurso = useMemo(() => {
     if (!seccionId) return null;
@@ -206,14 +192,6 @@ export default function Horario() {
   }, [seccionId, bloques, reglas, diasById, diasPorNumero]);
 
   const pid = Number(profesorId || 0);
-  const profSeccionIds = useMemo(() => {
-    if (!pid) return new Set<number>();
-    const s = new Set<number>();
-    for (const c of cargas) {
-      if (c.profesor && c.profesor.id === pid && c.curso?.seccionId) s.add(c.curso.seccionId);
-    }
-    return s;
-  }, [cargas, pid]);
 
   const profSeccionBaseId = useMemo(
     () => profesores.find((p) => p.id === pid)?.seccionBaseId ?? 0,
@@ -225,51 +203,35 @@ export default function Horario() {
     [profesores, pid]
   );
 
-  const filasProfesor = useMemo(() => {
-    if (!pid) return [];
-    const rows: { inicio: string; fin: string; tipo: "academico" | "evento" }[] = [];
-    const seen = new Map<string, "academico" | "evento">();
-    const add = (inicio: string, fin: string, tipo: "academico" | "evento") => {
-      const k = `${inicio}-${fin}`;
-      const prev = seen.get(k);
-      if (!prev) {
-        seen.set(k, tipo);
-        rows.push({ inicio, fin, tipo });
-      } else if (prev === "evento" && tipo === "academico") {
-        seen.set(k, "academico");
-        const r = rows.find((x) => x.inicio === inicio && x.fin === fin);
-        if (r) r.tipo = "academico";
-      }
-    };
-    for (const b of bloques) {
-      if (profSeccionIds.has(b.seccionId) && b.esAcademico) add(b.horaInicio, b.horaFin, "academico");
-    }
-    if (!fMateria) {
-      for (const r of reglas?.reunionesSeccion ?? []) {
-        if (r.secciones.some((s) => s.id === profSeccionBaseId)) add(r.horaInicio, r.horaFin, "evento");
-      }
-      for (const col of colaborativas) {
-        if (profDeptoId !== null && col.departamentoId === profDeptoId) add(col.horaInicio, col.horaFin, "evento");
-      }
-    }
-    rows.sort((a, b) => toMinutes(a.inicio) - toMinutes(b.inicio) || toMinutes(a.fin) - toMinutes(b.fin));
-    return rows;
-  }, [pid, bloques, profSeccionIds, profSeccionBaseId, reglas, colaborativas, profDeptoId, fMateria]);
+  const profBaseSecBloques = useMemo(
+    () => bloques.filter((b) => b.seccionId === profSeccionBaseId),
+    [bloques, profSeccionBaseId]
+  );
 
-  const profClases = useMemo(() => {
+  const profClasesByPeriod = useMemo(() => {
     const m = new Map<string, HorarioAsignado[]>();
     if (!pid) return m;
     for (const a of resultado) {
       if (a.cargaAcademica.profesor.id !== pid) continue;
       if (fMateria && a.cargaAcademica.materia.id !== Number(fMateria)) continue;
       const nd = numeroDeDiaId(a.bloqueHorario.diaSemanaId);
-      const key = `${nd}-${a.bloqueHorario.horaInicio}-${a.bloqueHorario.horaFin}`;
+      const match = profBaseSecBloques.find(
+        (b) =>
+          numeroDeDiaId(b.diaSemanaId) === nd &&
+          toMinutes(a.bloqueHorario.horaInicio) < toMinutes(b.horaFin) &&
+          toMinutes(b.horaInicio) < toMinutes(a.bloqueHorario.horaFin)
+      );
+      if (!match) continue;
+      const key = `${nd}-${match.numeroPeriodo}`;
       const arr = m.get(key) ?? [];
       arr.push(a);
       m.set(key, arr);
     }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.cargaAcademica.materia?.nombre ?? "").localeCompare(b.cargaAcademica.materia?.nombre ?? ""));
+    }
     return m;
-  }, [resultado, pid, fMateria, diasById]);
+  }, [resultado, pid, fMateria, profBaseSecBloques, diasById]);
 
   const reunionEnCelda = (nd: number, inicio: string, fin: string): ReunionSeccion | undefined =>
     reglas?.reunionesSeccion.find(
@@ -292,6 +254,72 @@ export default function Horario() {
 
   const numAsig = resultado.length;
   const visibleDias = fDia ? DIAS.filter((_, i) => String(i + 1) === fDia) : DIAS;
+
+  const profPorDia = useMemo(() => {
+    type Entry = {
+      bloque: BloqueHorario;
+      reu?: ReunionSeccion;
+      col?: ColaborativaGenerada;
+      clases?: HorarioAsignado[];
+      skip?: boolean;
+    };
+    const m = new Map<number, Entry[]>();
+    if (!pid || !profSeccionBaseId) return m;
+    for (const d of visibleDias) {
+      const nd = DIAS.indexOf(d) + 1;
+      const bloquesDia = profBaseSecBloques
+        .filter((b) => numeroDeDiaId(b.diaSemanaId) === nd)
+        .sort((a, b) => toMinutes(a.horaInicio) - toMinutes(b.horaInicio));
+      const entries: Entry[] = [];
+      let mergeId: string | null = null;
+      for (const b of bloquesDia) {
+        const reu = reunionEnCelda(nd, b.horaInicio, b.horaFin);
+        const col = colabEnCelda(nd, b.horaInicio, b.horaFin);
+        const id = reu || col ? `${reu ? `r${reu.id}` : "n"}|${col ? `c${col.id}` : "n"}` : null;
+        if (id) {
+          if (id === mergeId) {
+            entries.push({ bloque: b, skip: true });
+          } else {
+            mergeId = id;
+            entries.push({ bloque: b, reu, col });
+          }
+        } else {
+          mergeId = null;
+          entries.push({ bloque: b, clases: profClasesByPeriod.get(`${nd}-${b.numeroPeriodo}`) });
+        }
+      }
+      m.set(nd, entries);
+    }
+    return m;
+  }, [pid, profSeccionBaseId, visibleDias, profBaseSecBloques, profClasesByPeriod, reglas, colaborativas, profDeptoId, diasById]);
+
+  const resumenProfesor = useMemo(() => {
+    if (!pid || !profSeccionBaseId) return null;
+    const esEsp = (nd: number) => diasPorNumero.get(nd) ?? false;
+    const regularPeriodos = new Set<string>();
+    const viernesPeriodos = new Set<string>();
+    let regMin = Infinity, regMax = 0, vieMin = Infinity, vieMax = 0;
+    for (const a of resultado) {
+      if (a.cargaAcademica.profesor.id !== pid) continue;
+      const nd = numeroDeDiaId(a.bloqueHorario.diaSemanaId);
+      const ini = toMinutes(a.bloqueHorario.horaInicio);
+      const fin = toMinutes(a.bloqueHorario.horaFin);
+      if (esEsp(nd)) {
+        viernesPeriodos.add(a.bloqueHorario.numeroPeriodo);
+        vieMin = Math.min(vieMin, ini);
+        vieMax = Math.max(vieMax, fin);
+      } else {
+        regularPeriodos.add(a.bloqueHorario.numeroPeriodo);
+        regMin = Math.min(regMin, ini);
+        regMax = Math.max(regMax, fin);
+      }
+    }
+    const regular = regularPeriodos.size > 0 ? { n: regularPeriodos.size, ini: hhmm(regMin), fin: hhmm(regMax) } : null;
+    const viernes = viernesPeriodos.size > 0 ? { n: viernesPeriodos.size, ini: hhmm(vieMin), fin: hhmm(vieMax) } : null;
+    const nReu = (reglas?.reunionesSeccion ?? []).filter((r) => r.secciones.some((s) => s.id === profSeccionBaseId)).length;
+    const nCol = colaborativas.filter((c) => profDeptoId !== null && c.departamentoId === profDeptoId).length;
+    return { regular, viernes, nReu, nCol };
+  }, [pid, resultado, reglas, colaborativas, profSeccionBaseId, profDeptoId, diasById, diasPorNumero]);
 
   return (
     <div className="space-y-6">
@@ -432,7 +460,7 @@ export default function Horario() {
 
       {isLoading && <p className="text-sm text-slate-400">Cargando...</p>}
 
-      {view === "curso" && grid && (
+      {view === "curso" && cursoBloques.length > 0 && (
         <div className="space-y-2">
           {resumenCurso && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
@@ -460,81 +488,83 @@ export default function Horario() {
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full text-sm">
               <thead>
-                <CabeceraGrilla labelColumna="Período" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
+                <CabeceraGrilla labelColumna="" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {grid.periods.map((p) => (
-                    <tr key={p.numeroPeriodo}>
-                      <td className="px-4 py-2 whitespace-nowrap">
-                        <span className="font-medium text-slate-800">{p.numeroPeriodo}</span>
-                      </td>
-                      {visibleDias.map((d) => {
-                        const i = DIAS.indexOf(d);
-                        const nd = i + 1;
-                        const cell = grid.cells[`${nd}-${p.numeroPeriodo}`];
-                        const bloque = grid.bloquesPorCelda[`${nd}-${p.numeroPeriodo}`];
-                        const esDeporte = reglas?.deportes.some(
-                          (dep) =>
-                            dep.seccionId === seccionId &&
-                            numeroDeDiaId(dep.diaSemanaId) === nd &&
-                            dep.numeroPeriodo === p.numeroPeriodo
-                        );
-                        const esEspecialDia = diasPorNumero.get(nd) ?? false;
-                        return (
-                          <td key={i} className={`px-4 py-2 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                            {cell ? (
-                              cell.length > 1 ? (
-                                <div className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                    {cell.map((a) => (
+              <tbody>
+                <tr>
+                  <td className="w-10" />
+                  {visibleDias.map((d) => {
+                    const nd = DIAS.indexOf(d) + 1;
+                    const esEspecialDia = diasPorNumero.get(nd) ?? false;
+                    const bloquesDia = cursoBloques
+                      .filter((b) => numeroDeDiaId(b.diaSemanaId) === nd)
+                      .sort((a, b) => toMinutes(a.horaInicio) - toMinutes(b.horaInicio));
+                    return (
+                      <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                        <div className="space-y-1.5">
+                          {bloquesDia.map((b) => {
+                            const cell = cursoClases[`${nd}-${b.numeroPeriodo}`];
+                            const esDeporte = reglas?.deportes.some(
+                              (dep) =>
+                                dep.seccionId === seccionId &&
+                                numeroDeDiaId(dep.diaSemanaId) === nd &&
+                                dep.numeroPeriodo === b.numeroPeriodo
+                            );
+                            if (cell) {
+                              return cell.length > 1 ? (
+                                <div key={b.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                  <div className="flex flex-wrap items-center gap-y-0.5">
+                                    {cell.map((a, idx) => (
                                       <span key={a.id} className="whitespace-nowrap font-semibold text-indigo-800">
+                                        {idx > 0 && <span className="mx-1.5 font-normal text-indigo-400">/</span>}
                                         {a.cargaAcademica.materia?.nombre}
                                       </span>
                                     ))}
                                   </div>
-                                  <p className="text-xs text-indigo-600">
-                                    {cell.map((a) => a.cargaAcademica.profesor?.nombre).join(" · ")}
-                                  </p>
                                   <p className="text-[10px] text-indigo-400">
-                                    {cell[0].bloqueHorario.horaInicio}-{cell[0].bloqueHorario.horaFin} · Eligen los estudiantes
+                                    {cell[0].bloqueHorario.horaInicio}-{cell[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
                               ) : (
-                                <div className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                <div key={b.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
                                   <p className="font-semibold text-indigo-800">
                                     {cell[0].cargaAcademica.materia?.nombre}
-                                  </p>
-                                  <p className="text-xs text-indigo-600">
-                                    {cell[0].cargaAcademica.profesor?.nombre}
                                   </p>
                                   <p className="text-[10px] text-indigo-400">
                                     {cell[0].bloqueHorario.horaInicio}-{cell[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
-                              )
-                            ) : esDeporte ? (
-                              <div className="rounded-lg bg-emerald-50 px-3 py-2 shadow-sm">
-                                <p className="font-semibold text-emerald-800">Día de deportes</p>
-                                <p className="text-xs text-emerald-600">Bloque reservado</p>
-                              </div>
-                            ) : bloque ? (
-                              bloque.esAcademico ? (
-                                <span className="text-sm text-slate-400">
-                                  Libre {bloque.horaInicio}-{bloque.horaFin}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-amber-600">
-                                  {bloque.numeroPeriodo} · {bloque.horaInicio}-{bloque.horaFin} · Recreo
-                                </span>
-                              )
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                        );
-                      })}
-</tr>
-                  ))}
+                              );
+                            }
+                            if (esDeporte) {
+                              return (
+                                <div key={b.id} className="rounded-lg bg-emerald-50 px-3 py-2 shadow-sm">
+                                  <p className="font-semibold text-emerald-800">Día de deportes</p>
+                                  <p className="text-xs text-emerald-600">Bloque reservado</p>
+                                </div>
+                              );
+                            }
+                            if (!b.esAcademico) {
+                              return (
+                                <div key={b.id} className="rounded-lg bg-amber-50 px-3 py-2">
+                                  <p className="font-semibold text-amber-700">{b.numeroPeriodo}</p>
+                                  <p className="text-xs text-amber-600">
+                                    {b.horaInicio}-{b.horaFin} · Recreo
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return (
+                              <span key={b.id} className="block text-sm text-slate-400">
+                                Libre {b.horaInicio}-{b.horaFin}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -542,103 +572,131 @@ export default function Horario() {
       )}
 
       {view === "profesor" && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <CabeceraGrilla labelColumna="Hora" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filasProfesor.length === 0 && (
-                <tr>
-                  <td colSpan={visibleDias.length + 1} className="px-4 py-6 text-center text-slate-400">
-                    Selecciona un profesor para ver su horario semanal.
-                  </td>
-                </tr>
+        <div className="space-y-2">
+          {resumenProfesor && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+              {resumenProfesor.regular && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" />
+                  <span className="font-medium text-slate-800">Lun–Jue:</span>
+                  {resumenProfesor.regular.n} períodos ({resumenProfesor.regular.ini}–{resumenProfesor.regular.fin})
+                </span>
               )}
-              {filasProfesor.map((row) => (
-                <tr key={`${row.inicio}-${row.fin}`}>
-                  <td className="px-4 py-2 whitespace-nowrap text-slate-600">
-                    <span className="text-xs text-slate-400">{row.inicio}-{row.fin}</span>
-                    {row.tipo === "evento" && (
-                      <span className="ml-1 text-xs" title="Hueco reservado">
-                        <span className="text-purple-500">●</span>
-                      </span>
-                    )}
-                  </td>
+              {resumenProfesor.viernes && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />
+                  <span className="font-medium text-slate-800">Viernes (especial):</span>
+                  {resumenProfesor.viernes.n} períodos ({resumenProfesor.viernes.ini}–{resumenProfesor.viernes.fin})
+                </span>
+              )}
+              {resumenProfesor.nReu > 0 && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-purple-300" />
+                  <span className="font-medium text-slate-800">Reuniones de sección:</span>
+                  {resumenProfesor.nReu}
+                </span>
+              )}
+              {resumenProfesor.nCol > 0 && (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-300" />
+                  <span className="font-medium text-slate-800">Colaborativas de departamento:</span>
+                  {resumenProfesor.nCol}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="w-full text-sm">
+              <thead>
+                <CabeceraGrilla labelColumna="" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="w-10" />
                   {visibleDias.map((d) => {
                     const nd = DIAS.indexOf(d) + 1;
                     const esEspCol = diasPorNumero.get(nd) ?? false;
-                    const clase = profClases.get(`${nd}-${row.inicio}-${row.fin}`);
-                    if (clase) {
-                      return (
-                        <td key={d} className={`px-4 py-2 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                          <div className={clase.length > 1 ? "space-y-1" : undefined}>
-                            {clase.map((a) => (
-                              <div
-                                key={a.id}
-                                className={
-                                  clase.length > 1
-                                    ? "rounded-lg bg-indigo-50 px-2 py-1 shadow-sm"
-                                    : "rounded-lg bg-indigo-50 px-3 py-2 shadow-sm"
-                                }
-                              >
-                                <p className="font-semibold text-indigo-800">
-                                  {a.cargaAcademica.curso.nombre}
-                                </p>
-                                <p className="text-xs text-indigo-600">
-                                  {a.cargaAcademica.curso.seccion?.nombre} ·{" "}
-                                  {a.cargaAcademica.materia.nombre}
-                                </p>
-                              </div>
-                            ))}
-                            {clase.length > 1 && (
-                              <p className="text-[10px] font-medium text-indigo-400">
-                                Eligen los estudiantes
-                              </p>
-                            )}
-                          </div>
-                        </td>
-                      );
-                    }
-                    const reu = reunionEnCelda(nd, row.inicio, row.fin);
-                    if (reu) {
-                      return (
-                        <td key={d} className={`px-4 py-2 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                          <div className="rounded-lg bg-purple-50 px-3 py-2">
-                            <p className="font-semibold text-purple-800">
-                              Reunión: {reu.secciones.map((s) => s.nombre).join(" + ")}
-                            </p>
-                            <p className="text-xs text-purple-600">{reu.horaInicio}–{reu.horaFin}</p>
-                          </div>
-                        </td>
-                      );
-                    }
-                    const col = colabEnCelda(nd, row.inicio, row.fin);
-                    if (col) {
-                      return (
-                        <td key={d} className={`px-4 py-2 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                          <div className="rounded-lg bg-amber-50 px-3 py-2">
-                            <p className="font-semibold text-amber-800">
-                              Colaborativa · {col.departamento.nombre}
-                            </p>
-                            <p className="text-xs text-amber-600">{col.horaInicio}–{col.horaFin}</p>
-                          </div>
-                        </td>
-                      );
-                    }
-                    if (row.tipo === "academico") {
-                      return (
-                        <td key={d} className={`px-4 py-2 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
-                          <span className="text-slate-300">—</span>
-                        </td>
-                      );
-                    }
-                    return <td key={d} className={`px-4 py-2 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`} />;
+                    const entries = profPorDia.get(nd) ?? [];
+                    return (
+                      <td key={nd} className={`align-top px-3 py-3 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                        <div className="space-y-1.5">
+                          {entries.length === 0 && (
+                            <span className="text-xs text-slate-300">{pid ? "—" : "Selecciona un profesor"}</span>
+                          )}
+                          {entries.map((e) => {
+                            if (e.skip) return null;
+                            if (e.reu || e.col) {
+                              return (
+                                <div key={e.bloque.id} className="space-y-1">
+                                  {e.reu && (
+                                    <div className="rounded-lg bg-purple-50 px-3 py-2 shadow-sm">
+                                      <p className="font-semibold text-purple-800">
+                                        Reunión: {e.reu.secciones.map((s) => s.nombre).join(" + ")}
+                                      </p>
+                                      <p className="text-xs text-purple-600">{e.reu.horaInicio}–{e.reu.horaFin}</p>
+                                    </div>
+                                  )}
+                                  {e.col && (
+                                    <div className={`rounded-lg bg-amber-50 px-3 py-2 shadow-sm ${e.reu ? "mt-1" : ""}`}>
+                                      <p className="font-semibold text-amber-800">
+                                        Colaborativa · {e.col.departamento.nombre}
+                                      </p>
+                                      <p className="text-xs text-amber-600">{e.col.horaInicio}–{e.col.horaFin}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            if (e.clases && e.clases.length > 0) {
+                              return e.clases.length > 1 ? (
+                                <div key={e.bloque.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                  <div className="flex flex-wrap items-center gap-y-0.5">
+                                    {e.clases.map((a, idx) => (
+                                      <span key={a.id} className="whitespace-nowrap font-semibold text-indigo-800">
+                                        {idx > 0 && <span className="mx-1.5 font-normal text-indigo-400">/</span>}
+                                        {a.cargaAcademica.materia?.nombre}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <p className="text-xs text-indigo-600">
+                                    {e.clases.map((a) => `${a.cargaAcademica.curso.nombre} · ${a.cargaAcademica.curso.seccion?.nombre}`).join(" · ")}
+                                  </p>
+                                  <p className="text-[10px] text-indigo-400">
+                                    {e.clases[0].bloqueHorario.horaInicio}-{e.clases[0].bloqueHorario.horaFin}
+                                  </p>
+                                </div>
+                              ) : (
+                                <div key={e.bloque.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                  <p className="font-semibold text-indigo-800">{e.clases[0].cargaAcademica.materia?.nombre}</p>
+                                  <p className="text-xs text-indigo-600">
+                                    {e.clases[0].cargaAcademica.curso.nombre} · {e.clases[0].cargaAcademica.curso.seccion?.nombre}
+                                  </p>
+                                  <p className="text-[10px] text-indigo-400">
+                                    {e.clases[0].bloqueHorario.horaInicio}-{e.clases[0].bloqueHorario.horaFin}
+                                  </p>
+                                </div>
+                              );
+                            }
+                            if (!e.bloque.esAcademico) {
+                              return (
+                                <div key={e.bloque.id} className="rounded-lg bg-amber-50 px-3 py-2">
+                                  <p className="font-semibold text-amber-700">{e.bloque.numeroPeriodo}</p>
+                                  <p className="text-xs text-amber-600">
+                                    {e.bloque.horaInicio}-{e.bloque.horaFin} · Recreo
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })}
+                        </div>
+                      </td>
+                    );
                   })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

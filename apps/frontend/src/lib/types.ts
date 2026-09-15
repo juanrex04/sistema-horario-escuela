@@ -41,6 +41,7 @@ export type Departamento = {
 export type Materia = {
   id: number;
   nombre: string;
+  esEducacionFisica?: boolean;
   departamentoId: number | null;
   departamento?: Departamento | null;
   _count?: { cargas: number };

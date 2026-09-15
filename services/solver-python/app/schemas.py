@@ -58,6 +58,9 @@ class Curso(BaseModel):
 class Materia(BaseModel):
     id: int
     nombre: str
+    es_educacion_fisica: bool = Field(default=False, alias="esEducacionFisica")
+
+    model_config = {"populate_by_name": True}
 
 
 class Carga(BaseModel):
@@ -96,6 +99,18 @@ class MateriaMismoBloque(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class DiasSinPEPorSeccion(BaseModel):
+    seccion_id: int = Field(alias="seccionId")
+    dia_semana_ids: list[int] = Field(alias="diaSemanaIds")
+
+
+class ParPEMismoDia(BaseModel):
+    carga_a_id: int = Field(alias="cargaAId")
+    carga_b_id: int = Field(alias="cargaBId")
+
+    model_config = {"populate_by_name": True}
+
+
 class SolveRequest(BaseModel):
     secciones: list[Seccion] = []
     dias: list[Dia] = []
@@ -109,6 +124,12 @@ class SolveRequest(BaseModel):
     colaborativas: list[ColaborativaEntrada] = Field(default_factory=list)
     materias_mismo_bloque: list[MateriaMismoBloque] = Field(
         default_factory=list, alias="materiasMismoBloque"
+    )
+    dias_sin_pe_por_seccion: list[DiasSinPEPorSeccion] = Field(
+        default_factory=list, alias="diasSinPEPorSeccion"
+    )
+    pares_pe_mismo_dia: list[ParPEMismoDia] = Field(
+        default_factory=list, alias="paresPEMismoDia"
     )
     bloques_colaborativa: int = Field(default=2, alias="bloquesColaborativa")
 

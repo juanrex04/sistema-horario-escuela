@@ -77,10 +77,11 @@ model Curso {
 }
 
 model Materia {
-  id             Int                   @id @default(autoincrement())
-  nombre         String                @unique
-  departamento   Departamento?         @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
-  departamentoId Int?
+  id                  Int                   @id @default(autoincrement())
+  nombre              String                @unique
+  esEducacionFisica   Boolean               @default(false)
+  departamento        Departamento?         @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  departamentoId      Int?
   cargas         CargaAcademica[]
   mismoBloqueA   MateriaMismoBloque[]  @relation("MateriaMismoBloqueA")
   mismoBloqueB   MateriaMismoBloque[]  @relation("MateriaMismoBloqueB")
