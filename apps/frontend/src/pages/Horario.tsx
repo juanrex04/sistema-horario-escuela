@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RefreshCw, Trash2 } from "lucide-react";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, API_URL, getToken } from "../lib/api";
 import CabeceraGrilla, { columnasGrilla } from "../components/CabeceraGrilla";
 import type {
   BloqueHorario,
@@ -14,6 +14,7 @@ import type {
   Profesor,
   Reglas,
   ReunionSeccion,
+  Seccion,
 } from "../lib/types";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
@@ -41,6 +42,29 @@ export default function Horario() {
     sugerencias?: string[];
   } | null>(null);
 
+  const descargarPdf = async (seccion: Seccion) => {
+    try {
+      const res = await fetch(`${API_URL}/timetables/pdf?seccionId=${seccion.id}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        setFeedback(`No se pudo descargar el PDF de ${seccion.nombre} (${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `horario-${seccion.nombre.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setFeedback(`Error al descargar el PDF de ${seccion.nombre}`);
+    }
+  };
+
   const { data: resultado = [], isLoading } = useQuery({
     queryKey: ["resultado"],
     queryFn: () => api.get<HorarioAsignado[]>("/timetables/resultado"),
@@ -52,6 +76,10 @@ export default function Horario() {
   const { data: profesores = [] } = useQuery({
     queryKey: ["profesores"],
     queryFn: () => api.get<Profesor[]>("/profesores"),
+  });
+  const { data: secciones = [] } = useQuery({
+    queryKey: ["secciones"],
+    queryFn: () => api.get<Seccion[]>("/secciones"),
   });
   const { data: bloques = [] } = useQuery({
     queryKey: ["bloques"],
@@ -333,6 +361,24 @@ export default function Horario() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value=""
+            disabled={numAsig === 0}
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              const sec = secciones.find((s) => s.id === id);
+              if (id && sec) void descargarPdf(sec);
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500 disabled:opacity-40"
+            title="Descargar horario en PDF por sección"
+          >
+            <option value="">PDF por sección...</option>
+            {secciones.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nombre}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => clear.mutate()}
             disabled={clear.isPending || numAsig === 0}

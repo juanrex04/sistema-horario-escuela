@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { config } from "../config.js";
 import { diagnosticarInviabilidad } from "../lib/diagnosticoInviabilidad.js";
+import { generarPdfSeccion, nombreArchivoSeccion } from "../lib/horarioPdf.js";
 
 const router = Router();
 
@@ -440,6 +441,54 @@ router.get("/resultado/colaborativas", async (_req, res) => {
     orderBy: [{ diaSemanaId: "asc" }, { horaInicio: "asc" }],
   });
   res.json(items);
+});
+
+router.get("/pdf", async (req, res) => {
+  const seccionId = Number(req.query.seccionId);
+  if (!Number.isInteger(seccionId)) {
+    res.status(400).json({ error: "Parámetro seccionId inválido" });
+    return;
+  }
+
+  const seccion = await prisma.seccion.findUnique({ where: { id: seccionId } });
+  if (!seccion) {
+    res.status(404).json({ error: "Sección no encontrada" });
+    return;
+  }
+
+  const [asignaciones, bloques, cursos, profesores, reuniones, deportes, colaborativas, dias] = await Promise.all([
+    prisma.horarioAsignado.findMany({
+      include: {
+        bloqueHorario: { include: { seccion: true, diaSemana: true } },
+        cargaAcademica: {
+          include: { curso: { include: { seccion: true } }, materia: true, profesor: true },
+        },
+      },
+    }),
+    prisma.bloqueHorario.findMany(),
+    prisma.curso.findMany(),
+    prisma.profesor.findMany({ include: { seccionBase: true } }),
+    prisma.reunionSeccion.findMany({ include: { secciones: true } }),
+    prisma.deporteSeccion.findMany(),
+    prisma.colaborativaGenerada.findMany({ include: { departamento: { select: { id: true, nombre: true } } } }),
+    prisma.diaSemana.findMany({ select: { id: true, numeroDia: true } }),
+  ]);
+
+  const pdfBytes = await generarPdfSeccion({
+    seccion,
+    asignaciones,
+    bloques,
+    cursos,
+    profesores,
+    reuniones,
+    deportes,
+    colaborativas,
+    dias,
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivoSeccion(seccion.nombre)}"`);
+  res.send(Buffer.from(pdfBytes));
 });
 
 export default router;
