@@ -27,6 +27,7 @@ export type Profesor = {
   departamento?: Departamento | null;
   prefiereGruposConsecutivos?: boolean;
   esTiempoCompleto?: boolean;
+  peParesMismoDia?: boolean;
   jornadaParcial?: { diaSemanaId: number; horaFin: string }[] | null;
   _count?: { cargas: number };
 };

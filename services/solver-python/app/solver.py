@@ -83,6 +83,14 @@ def solve(req: SolveRequest) -> SolveResponse:
             dias_bloqueados.dia_semana_ids
         )
 
+    # Regla C: (seccionId, diaSemanaId) -> hora de inicio del deporte de ese día.
+    limite_pe_por_seccion_dia: dict[tuple[int, int], int] = {}
+    for d in req.deportes_pe_antes:
+        clave = (d.seccion_id, d.dia_semana_id)
+        previo = limite_pe_por_seccion_dia.get(clave)
+        if previo is None or int(d.inicio_min) < previo:
+            limite_pe_por_seccion_dia[clave] = int(d.inicio_min)
+
     for carga in req.cargas:
         curso = curso_por_id[carga.curso_id]
 
@@ -100,6 +108,18 @@ def solve(req: SolveRequest) -> SolveResponse:
             if dias_pe:
                 for b_id, b in academic_blocks.items():
                     if b.seccion_id == curso.seccion_id and b.dia_semana_id in dias_pe:
+                        prohibidas.setdefault(carga.id, set()).add(b_id)
+
+            # Regla C: en los días de deporte, la P.E. de la sección debe quedar
+            # en un período anterior al bloque de deporte. El backend solo envía
+            # `deportes_pe_antes` para las secciones donde la regla está vigente.
+            for (seccion_id, dia_id), limite in limite_pe_por_seccion_dia.items():
+                if seccion_id != curso.seccion_id:
+                    continue
+                for b_id, b in academic_blocks.items():
+                    if b.seccion_id != curso.seccion_id or b.dia_semana_id != dia_id:
+                        continue
+                    if int(b.fin_min) > limite:
                         prohibidas.setdefault(carga.id, set()).add(b_id)
 
     profesor_base_por_id = {p.id: p.seccion_base_id for p in req.profesores}
@@ -151,12 +171,21 @@ def solve(req: SolveRequest) -> SolveResponse:
         curso = curso_por_id[carga.curso_id]
         prof = profesor_por_id.get(carga.profesor_id)
         bloqueados = prohibidas.get(carga.id) or set()
-        libre = [
-            b_id
-            for b_id in bloques_por_seccion.get(curso.seccion_id, [])
-            if b_id not in bloqueados
-            and (prof is None or _disponibilidad_ok(academic_blocks[b_id], prof))
-        ]
+
+        # Bloques fijos: la carga solo puede ocupar los anclados. Se ignoran las
+        # prohibiciones y la disponibilidad del docente, porque el docente ya se
+        # comprometería a ese horario; el resto de reglas del solver sigue aplicando.
+        if carga.bloques_fijos:
+            libre = [b_id for b_id in carga.bloques_fijos if b_id in academic_blocks]
+            if len(libre) != carga.bloques_semanales_requeridos:
+                return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])
+        else:
+            libre = [
+                b_id
+                for b_id in bloques_por_seccion.get(curso.seccion_id, [])
+                if b_id not in bloqueados
+                and (prof is None or _disponibilidad_ok(academic_blocks[b_id], prof))
+            ]
         if len(libre) < carga.bloques_semanales_requeridos:
             return SolveResponse(status="INFEASIBLE", num_asignaciones=0, asignaciones=[])
         candidatos[carga.id] = libre

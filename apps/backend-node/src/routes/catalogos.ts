@@ -496,6 +496,7 @@ const profesorFields = {
   seccionBaseId: z.number().int().positive(),
   prefiereGruposConsecutivos: z.boolean().optional(),
   esTiempoCompleto: z.boolean().optional(),
+  peParesMismoDia: z.boolean().optional(),
   jornadaParcial: z.array(jornadaParcialSchema).optional().nullable(),
 };
 
@@ -1060,6 +1061,89 @@ router.patch("/cargas/:id", async (req, res) => {
 router.delete("/cargas/:id", async (req, res) => {
   await prisma.cargaAcademica.delete({ where: { id: parseId(req.params.id) } });
   res.status(204).end();
+});
+
+/* ---------------- Bloques fijos de una carga ---------------- */
+
+const bloquesFijosSchema = z.object({
+  bloqueHorarioIds: z.array(z.number().int().positive()),
+});
+
+router.get("/cargas/:id/bloques-fijos", async (req, res) => {
+  const id = parseId(req.params.id);
+  const carga = await prisma.cargaAcademica.findUnique({
+    where: { id },
+    select: { id: true, bloquesSemanalesRequeridos: true, cursoId: true },
+  });
+  if (!carga) throw new HttpError(404, "Carga académica no encontrada.");
+  const items = await prisma.cargaBloqueFijo.findMany({
+    where: { cargaAcademicaId: id },
+    orderBy: { bloqueHorarioId: "asc" },
+    select: { id: true, bloqueHorarioId: true },
+  });
+  res.json({
+    cargaId: carga.id,
+    bloquesSemanalesRequeridos: carga.bloquesSemanalesRequeridos,
+    bloqueHorarioIds: items.map((i) => i.bloqueHorarioId),
+  });
+});
+
+router.put("/cargas/:id/bloques-fijos", async (req, res) => {
+  const id = parseId(req.params.id);
+  const parsed = bloquesFijosSchema.safeParse(req.body);
+  if (!parsed.success)
+    return void res.status(400).json({ error: "Datos inválidos", details: parsed.error.flatten() });
+  const { bloqueHorarioIds } = parsed.data;
+  const unicos = [...new Set(bloqueHorarioIds)];
+
+  const carga = await prisma.cargaAcademica.findUnique({
+    where: { id },
+    select: { id: true, bloquesSemanalesRequeridos: true, cursoId: true },
+  });
+  if (!carga) throw new HttpError(404, "Carga académica no encontrada.");
+
+  if (unicos.length !== bloqueHorarioIds.length)
+    throw new HttpError(400, "La lista de bloques fijos tiene bloques repetidos.");
+
+  // Un bloque fijo solo tiene sentido si la carga lo puede dictar: debe pertenecer
+  // a la sección del curso, ser académico y no estar en un horario especial.
+  if (unicos.length > 0) {
+    const bloques = await prisma.bloqueHorario.findMany({
+      where: { id: { in: unicos } },
+      include: { diaSemana: true },
+    });
+    if (bloques.length !== unicos.length)
+      throw new HttpError(400, "Alguno de los bloques indicados no existe.");
+    for (const b of bloques) {
+      if (b.seccionId !== carga.cursoId)
+        throw new HttpError(
+          400,
+          `El bloque ${b.numeroPeriodo} pertenece a otra sección y no puede fijarse para esta carga.`
+        );
+      if (!b.esAcademico)
+        throw new HttpError(400, `El bloque ${b.numeroPeriodo} no es un bloque académico.`);
+      if (b.diaSemana.esHorarioEspecial)
+        throw new HttpError(400, `El bloque ${b.numeroPeriodo} cae en un horario especial.`);
+    }
+  }
+
+  if (unicos.length > 0 && unicos.length !== carga.bloquesSemanalesRequeridos)
+    throw new HttpError(
+      400,
+      `La carga requiere ${carga.bloquesSemanalesRequeridos} bloques semanales, pero se fijaron ${unicos.length}.`
+    );
+
+  await prisma.$transaction([
+    prisma.cargaBloqueFijo.deleteMany({ where: { cargaAcademicaId: id } }),
+    ...(unicos.length > 0
+      ? [
+          prisma.cargaBloqueFijo.createMany({
+            data: unicos.map((bloqueHorarioId) => ({ cargaAcademicaId: id, bloqueHorarioId })),
+          }),
+        ]
+      : []),
+  ]);
+  res.json({ cargaId: id, bloqueHorarioIds: unicos });
 });
 
 export default router;

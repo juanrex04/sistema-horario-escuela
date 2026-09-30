@@ -49,6 +49,7 @@ model BloqueHorario {
   horaFin      String
   esAcademico  Boolean @default(true)
   asignaciones HorarioAsignado[]
+  cargasFijas  CargaBloqueFijo[]
 
   @@unique([seccionId, diaSemanaId, numeroPeriodo])
 }
@@ -62,6 +63,7 @@ model Profesor {
   departamentoId            Int?
   prefiereGruposConsecutivos Boolean @default(false)
   esTiempoCompleto          Boolean  @default(true)
+  peParesMismoDia           Boolean  @default(false)
   jornadaParcial            Json?
   cargas                    CargaAcademica[]
 }
@@ -177,11 +179,22 @@ model CargaAcademica {
   profesorId                 Int
   bloquesSemanalesRequeridos Int
   asignaciones               HorarioAsignado[]
+  bloquesFijos               CargaBloqueFijo[]
 
   @@unique([cursoId, materiaId, profesorId])
 }
 
 model HorarioAsignado {
+  id               Int            @id @default(autoincrement())
+  cargaAcademica   CargaAcademica @relation(fields: [cargaAcademicaId], references: [id], onDelete: Cascade)
+  cargaAcademicaId Int
+  bloqueHorario    BloqueHorario  @relation(fields: [bloqueHorarioId], references: [id], onDelete: Cascade)
+  bloqueHorarioId  Int
+
+  @@unique([cargaAcademicaId, bloqueHorarioId])
+}
+
+model CargaBloqueFijo {
   id               Int            @id @default(autoincrement())
   cargaAcademica   CargaAcademica @relation(fields: [cargaAcademicaId], references: [id], onDelete: Cascade)
   cargaAcademicaId Int

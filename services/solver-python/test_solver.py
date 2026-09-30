@@ -3,6 +3,7 @@ from app.schemas import (
     SolveRequest, Seccion, Dia, Bloque, Profesor, Curso, Materia, Carga,
     ReunionSeccion, Deporte, ColaborativaEntrada, MateriaMismoBloque, JornadaDia,
     DiasSinPEPorSeccion, ParPEMismoDia, Espacio, MateriaEspacioEntrada,
+    DeportePEAntes,
 )
 
 DIAS = [
@@ -869,5 +870,208 @@ result31 = solve(payload31)
 assert result31.status == "OPTIMAL", result31.status
 assert result31.num_pe_antes_lunch == 2, f"PE debería quedar antes del LUNCH: {result31.num_pe_antes_lunch}"
 print("[31] P.E. antes del LUNCH (blando): numPEAntesLunch=2 OK")
+
+# ---------------------------------------------------------------------------
+# Regla C: la P.E. debe quedar en un período anterior al bloque de deporte.
+# El backend solo envía `deportesPEAntes` para las secciones donde la regla
+# está vigente (Primaria, Middle School, Diploma).
+# ---------------------------------------------------------------------------
+
+def bloques_regla_c(seccion_id=1, dias=(1, 2)):
+    """4 bloques académicos por día: P1 420-480, P2 480-540, P3 540-600, P4 600-660."""
+    out = []
+    i = 1
+    for d in dias:
+        for p, ini, fin in (
+            (1, 420, 480), (2, 480, 540), (3, 540, 600), (4, 600, 660),
+        ):
+            out.append(Bloque(id=i, seccionId=seccion_id, diaSemanaId=d, numeroPeriodo=str(p),
+                              inicioMin=ini, finMin=fin, esAcademico=True))
+            i += 1
+    return out
+
+
+PE_MATERIA = [Materia(id=1, nombre="P.E", esEducacionFisica=True)]
+
+# 40. Regla C: deporte en un período intermedio (día 1 P3, 09:00). Los bloques
+#     P3 y P4 del día 1 quedan después del inicio del deporte, así que la P.E.
+#     no puede caer ahí, aunque el bloque P3 esté libre para ella.
+payload40 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Diploma")],
+    dias=DIAS,
+    bloques=bloques_regla_c(1, dias=(1, 2)),
+    profesores=[Profesor(id=1, nombre="Andres", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="11A", seccionId=1)],
+    materias=PE_MATERIA,
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="3")],
+    deportesPEAntes=[DeportePEAntes(seccionId=1, diaSemanaId=1, inicioMin=540)],
+)
+result40 = solve(payload40)
+assert result40.status == "OPTIMAL", result40.status
+ids40 = {a.bloque_horario_id for a in result40.asignaciones}
+por_bloque40 = {b.id: b for b in payload40.bloques}
+for bid in ids40:
+    b = por_bloque40[bid]
+    if b.dia_semana_id == 1:
+        assert b.fin_min <= 540, (
+            f"la P.E. no puede quedar después del inicio del deporte (09:00): bloque {bid} "
+            f"termina {b.fin_min}"
+        )
+assert len(ids40) == 2, f"la carga requiere 2 bloques: {ids40}"
+print(f"[40] P.E. antes del bloque de deporte ({sorted(ids40)}) OK")
+
+# 41. Regla C (INFEASIBLE): el deporte ocupa el primer período del único día
+#     (P1, 07:00), así que ningún bloque queda antes. La P.E. no tiene dónde ir.
+payload41 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Diploma")],
+    dias=DIAS,
+    bloques=bloques_regla_c(1, dias=(1,)),
+    profesores=[Profesor(id=1, nombre="Andres", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="11A", seccionId=1)],
+    materias=PE_MATERIA,
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="1")],
+    deportesPEAntes=[DeportePEAntes(seccionId=1, diaSemanaId=1, inicioMin=420)],
+)
+result41 = solve(payload41)
+assert result41.status == "INFEASIBLE", (
+    f"sin bloques previos al deporte debería ser INFEASIBLE, se obtuvo {result41.status}"
+)
+print("[41] P.E. sin ningún bloque previo al deporte: INFEASIBLE OK")
+
+# 42. Alcance por sección: la regla solo aplica a las secciones enviadas por el
+#     backend. La sección 2 (p. ej. Preescolar) no se restringe aunque el mismo
+#     escenario sería inviable si la regla aplicara.
+def _payload42(seccion_id, deportes_pe_antes=None):
+    return SolveRequest(
+        secciones=[Seccion(id=seccion_id, nombre=f"Sec{seccion_id}")],
+        dias=DIAS,
+        bloques=bloques_regla_c(seccion_id, dias=(1,)),
+        profesores=[Profesor(id=1, nombre="P", seccionBaseId=seccion_id)],
+        cursos=[Curso(id=1, nombre="1A", seccionId=seccion_id)],
+        materias=PE_MATERIA,
+        cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+        deportes=[Deporte(seccionId=seccion_id, diaSemanaId=1, numeroPeriodo="1")],
+        deportesPEAntes=deportes_pe_antes or [],
+    )
+
+r42 = solve(_payload42(2))
+assert r42.status == "OPTIMAL", (
+    f"la sección 2 no está en deportesPEAntes, la P.E. debe poder asignarse: {r42.status}"
+)
+
+r42b = solve(_payload42(2, [DeportePEAntes(seccionId=2, diaSemanaId=1, inicioMin=420)]))
+assert r42b.status == "INFEASIBLE", (
+    f"con la regla activa en la sección 2 debería ser INFEASIBLE: {r42b.status}"
+)
+print("[42] la Regla C solo restringe a las secciones enviadas OK")
+
+# 43. Regresión: sin `deportesPEAntes` el comportamiento no cambia y la P.E. sí
+#     puede quedar después del deporte. único día con P1..P4, deporte en P3
+#     (reservado) → para la P.E. solo quedan P1, P2 y P4; con 3 bloques
+#     requeridos está obligada a tomar P4, que es posterior al deporte.
+payload43 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Diploma")],
+    dias=DIAS,
+    bloques=bloques_regla_c(1, dias=(1,)),
+    profesores=[Profesor(id=1, nombre="Andres", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="11A", seccionId=1)],
+    materias=PE_MATERIA,
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=3)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="3")],
+    deportesPEAntes=[],
+)
+result43 = solve(payload43)
+assert result43.status == "OPTIMAL", result43.status
+ids43 = {a.bloque_horario_id for a in result43.asignaciones}
+assert 4 in ids43, (
+    f"sin la Regla C la P.E. puede ocupar P4 (después del deporte): {ids43}"
+)
+print(f"[43] payload sin deportesPEAntes: sin cambios de comportamiento OK ({sorted(ids43)})")
+
+# 44. Regla C combinada con la Regla A (Primaria): sports en día 1, la Regla A
+#     prohíbe todo el día 1 para P.E. y la Regla C exigía estar antes de P3.
+#     Con la Regla A activa el resultado es idéntico: la P.E. va al día 2.
+payload44 = SolveRequest(
+    secciones=[Seccion(id=1, nombre="Primaria")],
+    dias=DIAS,
+    bloques=bloques_regla_c(1, dias=(1, 2)),
+    profesores=[Profesor(id=1, nombre="Ricardo", seccionBaseId=1)],
+    cursos=[Curso(id=1, nombre="5A", seccionId=1)],
+    materias=PE_MATERIA,
+    cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1, bloquesSemanalesRequeridos=2)],
+    deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="3")],
+    diasSinPEPorSeccion=[DiasSinPEPorSeccion(seccionId=1, diaSemanaIds=[1])],
+    deportesPEAntes=[DeportePEAntes(seccionId=1, diaSemanaId=1, inicioMin=540)],
+)
+result44 = solve(payload44)
+assert result44.status == "OPTIMAL", result44.status
+dias44 = {
+    b.dia_semana_id
+    for b in payload44.bloques
+    if b.id in {a.bloque_horario_id for a in result44.asignaciones}
+}
+assert 1 not in dias44, f"la Regla A ya impide el día de deportes completo: {dias44}"
+print(f"[44] Regla C junto a la Regla A sin conflicto (días PE: {sorted(dias44)}) OK")
+
+# ---------------------------------------------------------------------------
+# Bloques fijos por carga: si la carga trae `bloquesFijos`, solo puede ocupar
+# esos bloques, sin importar lo que diga el resto de reglas.
+# ---------------------------------------------------------------------------
+
+def _payload_fijos(bloques_fijos, bloques_requeridos=2, dias=(1, 2), dias_sin_pe=None):
+    return SolveRequest(
+        secciones=[Seccion(id=1, nombre="Primaria")],
+        dias=DIAS,
+        bloques=bloques_regla_c(1, dias=dias),
+        profesores=[Profesor(id=1, nombre="Ricardo", seccionBaseId=1)],
+        cursos=[Curso(id=1, nombre="5A", seccionId=1)],
+        materias=PE_MATERIA,
+        cargas=[Carga(id=1, cursoId=1, materiaId=1, profesorId=1,
+                      bloquesSemanalesRequeridos=bloques_requeridos,
+                      bloquesFijos=bloques_fijos)],
+        deportes=[Deporte(seccionId=1, diaSemanaId=1, numeroPeriodo="3")],
+        diasSinPEPorSeccion=dias_sin_pe or [],
+    )
+
+# 45. Bloques fijos: se fijan P2 y P3 del día 1 (ids 2 y 3) y la carga debe
+#     ocupar exactamente esos, sin poder moverse al día 2.
+r45 = solve(_payload_fijos([2, 3]))
+assert r45.status == "OPTIMAL", r45.status
+ids45 = {a.bloque_horario_id for a in r45.asignaciones}
+assert ids45 == {2, 3}, f"la carga debe ocupar solo sus bloques fijos, obtuvo {ids45}"
+print(f"[45] bloques fijos respetados ({sorted(ids45)}) OK")
+
+# 46. Sin bloques fijos el solver sigue eligiendo libremente (sin regresión).
+r46 = solve(_payload_fijos([]))
+assert r46.status == "OPTIMAL", r46.status
+ids46 = {a.bloque_horario_id for a in r46.asignaciones}
+assert len(ids46) == 2, f"la carga requiere 2 bloques: {ids46}"
+print(f"[46] carga sin bloques fijos: libre ({sorted(ids46)}) OK")
+
+# 47. Bloques fijos ignoran la Regla A: el día 1 completo está prohibido para
+#     P.E., pero si el docente se compromete a ese día, el bloque fijado prima.
+r47 = solve(_payload_fijos([1, 2], dias_sin_pe=[DiasSinPEPorSeccion(seccionId=1, diaSemanaIds=[1])]))
+assert r47.status == "OPTIMAL", (
+    f"un bloque fijo explícito debe prevalecer sobre la Regla A, obtuvo {r47.status}"
+)
+ids47 = {a.bloque_horario_id for a in r47.asignaciones}
+assert ids47 == {1, 2}, f"la carga debe quedar en sus bloques fijos, obtuvo {ids47}"
+print(f"[47] bloque fijo prevalece sobre la Regla A ({sorted(ids47)}) OK")
+
+# 48. Cantidad de bloques fijos distinta de la requerida -> INFEASIBLE.
+r48 = solve(_payload_fijos([2], bloques_requeridos=2))
+assert r48.status == "INFEASIBLE", (
+    f"con 1 solo bloque fijo para 2 requeridos debe ser INFEASIBLE, obtuvo {r48.status}"
+)
+print("[48] bloques fijos insuficientes: INFEASIBLE OK")
+
+# 49. Bloque fijo inexistente -> INFEASIBLE, no se ignora en silencio.
+r49 = solve(_payload_fijos([999, 1000]))
+assert r49.status == "INFEASIBLE", (
+    f"un bloque fijo inexistente debe hacer INFEASIBLE, obtuvo {r49.status}"
+)
+print("[49] bloque fijo inexistente: INFEASIBLE OK")
 
 print("OK")

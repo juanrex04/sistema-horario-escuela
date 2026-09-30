@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX, X } from "lucide-react";
+import { Pencil, Pin, Plus, Search, Trash2, FilterX, X } from "lucide-react";
 import { api } from "../lib/api";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import type { CargaAcademica, Curso, Materia, Profesor, Seccion } from "../lib/types";
+import type { BloqueHorario, CargaAcademica, Curso, DiaSemana, Materia, Profesor, Seccion } from "../lib/types";
 
 type FormState = {
   cursoId: string;
@@ -48,10 +48,60 @@ export default function Cargas() {
   const [bulkAviso, setBulkAviso] = useState<string | null>(null);
   const [mostrarTodasMaterias, setMostrarTodasMaterias] = useState(false);
   const [toDelete, setToDelete] = useState<CargaAcademica | null>(null);
+  const [pinCarga, setPinCarga] = useState<CargaAcademica | null>(null);
+  const [pinSel, setPinSel] = useState<number[]>([]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["cargas"] });
   };
+
+  const pinSeccionId = pinCarga?.curso?.seccionId ?? null;
+
+  const { data: dias = [] } = useQuery({
+    queryKey: ["dias"],
+    queryFn: () => api.get<DiaSemana[]>("/dias"),
+  });
+
+  // Solo se piden los bloques de la sección del curso: son los únicos fijables.
+  const { data: bloquesPin = [] } = useQuery({
+    queryKey: ["bloques-pin", pinSeccionId],
+    queryFn: () =>
+      api.get<BloqueHorario[]>(`/bloques?paginado=false&seccionId=${pinSeccionId}&esAcademico=true`),
+    enabled: pinSeccionId !== null,
+  });
+
+  const { data: fijosActuales } = useQuery({
+    queryKey: ["carga-bloques-fijos", pinCarga?.id],
+    queryFn: () =>
+      api.get<{ cargaId: number; bloquesSemanalesRequeridos: number; bloqueHorarioIds: number[] }>(
+        `/cargas/${pinCarga!.id}/bloques-fijos`
+      ),
+    enabled: pinCarga !== null,
+  });
+
+  const guardarFijos = useMutation({
+    mutationFn: (ids: number[]) => api.put(`/cargas/${pinCarga!.id}/bloques-fijos`, { bloqueHorarioIds: ids }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["carga-bloques-fijos"] });
+      setPinCarga(null);
+      setPinSel([]);
+    },
+  });
+
+  function abrirFijos(c: CargaAcademica) {
+    setPinCarga(c);
+    setPinSel([]);
+  }
+
+  function toggleFijo(id: number) {
+    setPinSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  const bloquesPorDia = dias
+    .map((d) => ({ dia: d, bloques: bloquesPin.filter((b) => b.diaSemanaId === d.id) }))
+    .filter((g) => g.bloques.length > 0);
+  const requeridos = pinCarga?.bloquesSemanalesRequeridos ?? 0;
+  const pinValido = pinSel.length === 0 || pinSel.length === requeridos;
 
   const createMasivas = useMutation({
     mutationFn: (data: {
@@ -422,6 +472,13 @@ export default function Cargas() {
                         <td className="px-4 py-2.5 text-right">
                           <div className="inline-flex gap-1">
                             <button
+                              onClick={() => abrirFijos(c)}
+                              title="Fijar bloques"
+                              className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                            >
+                              <Pin className="h-4 w-4" />
+                            </button>
+                            <button
                               onClick={() => openEdit(c)}
                               className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
                             >
@@ -705,6 +762,103 @@ export default function Cargas() {
             </div>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={pinCarga !== null}
+        title="Fijar bloques de la carga"
+        onClose={() => {
+          setPinCarga(null);
+          setPinSel([]);
+        }}
+        maxWidth="max-w-3xl"
+      >
+        <p className="text-sm text-slate-600">
+          {pinCarga?.materia?.nombre} en {pinCarga?.curso?.nombre} · {pinCarga?.profesor?.nombre}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          Esta carga requiere {requeridos} bloque(s) por semana. Si eliges bloques, la carga solo
+          podrá dictarse en esos horarios; déjalos todos desmarcados para que el solver elija.
+        </p>
+
+        {!fijosActuales && (
+          <p className="mt-3 text-sm text-slate-400">Cargando bloques fijos actuales...</p>
+        )}
+        {fijosActuales && fijosActuales.bloqueHorarioIds.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Hay {fijosActuales.bloqueHorarioIds.length} bloque(s) fijado(s) guardados. Si no
+            seleccionas ninguno al guardar, se eliminan y la carga vuelve a ser libre.
+          </div>
+        )}
+
+        <div className="mt-4 space-y-4">
+          {bloquesPorDia.map(({ dia, bloques }) => (
+            <div key={dia.id}>
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Día {dia.numeroDia}
+              </h3>
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {bloques
+                  .slice()
+                  .sort((a, b) => a.numeroPeriodo.localeCompare(b.numeroPeriodo))
+                  .map((b) => {
+                    const marcado = pinSel.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => toggleFijo(b.id)}
+                        className={`rounded-lg border px-2 py-1.5 text-left text-xs transition-colors ${
+                          marcado
+                            ? "border-indigo-500 bg-indigo-50 text-indigo-800"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="block font-medium">P{b.numeroPeriodo}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {b.horaInicio}-{b.horaFin}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+          {bloquesPorDia.length === 0 && (
+            <p className="text-sm text-slate-400">No hay bloques académicos para esta sección.</p>
+          )}
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <span
+            className={`text-xs ${pinSel.length === requeridos ? "text-emerald-600" : "text-slate-500"}`}
+          >
+            {pinSel.length} de {requeridos} seleccionados
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setPinCarga(null);
+                setPinSel([]);
+              }}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={!pinValido || guardarFijos.isPending}
+              onClick={() => guardarFijos.mutate(pinSel)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {guardarFijos.isPending ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+        </div>
+        {guardarFijos.isError && (
+          <p className="mt-2 text-sm text-red-600">{guardarFijos.error.message}</p>
+        )}
       </Modal>
 
       <ConfirmDialog

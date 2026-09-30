@@ -18,6 +18,7 @@ type FormState = {
   seccionBaseId: string;
   prefiereGruposConsecutivos: boolean;
   esTiempoCompleto: boolean;
+  peParesMismoDia: boolean;
   jornada: { diaSemanaId: number; horaFin: string }[];
 };
 
@@ -27,6 +28,7 @@ const EMPTY: FormState = {
   seccionBaseId: "",
   prefiereGruposConsecutivos: false,
   esTiempoCompleto: true,
+  peParesMismoDia: false,
   jornada: [],
 };
 
@@ -72,6 +74,7 @@ export default function Docentes() {
       seccionBaseId: number;
       prefiereGruposConsecutivos?: boolean;
       esTiempoCompleto?: boolean;
+      peParesMismoDia?: boolean;
       jornadaParcial?: { diaSemanaId: number; horaFin: string }[] | null;
     }) => api.post("/profesores", data),
     onSuccess: () => {
@@ -115,6 +118,7 @@ export default function Docentes() {
       seccionBaseId: String(p.seccionBaseId),
       prefiereGruposConsecutivos: p.prefiereGruposConsecutivos ?? false,
       esTiempoCompleto: p.esTiempoCompleto ?? true,
+      peParesMismoDia: p.peParesMismoDia ?? false,
       jornada: (p.jornadaParcial ?? []).map((j) => ({ diaSemanaId: j.diaSemanaId, horaFin: j.horaFin })),
     });
     setFormOpen(true);
@@ -133,6 +137,7 @@ export default function Docentes() {
       seccionBaseId: Number(form.seccionBaseId),
       prefiereGruposConsecutivos: form.prefiereGruposConsecutivos,
       esTiempoCompleto: form.esTiempoCompleto,
+      peParesMismoDia: form.peParesMismoDia,
       jornadaParcial: form.esTiempoCompleto ? null : form.jornada,
     };
     if (editing) update.mutate({ id: editing.id, data });
@@ -245,6 +250,14 @@ export default function Docentes() {
                       title="Prefiere clases consecutivas entre grupos del mismo grado (misma materia y sección)"
                     >
                       Consecutivos
+                    </span>
+                  )}
+                  {p.peParesMismoDia && (
+                    <span
+                      className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                      title="Empareja sus grupos de P.E. del mismo grado para que se dicten el mismo día"
+                    >
+                      P.E. pareada
                     </span>
                   )}
                 </td>
@@ -362,6 +375,21 @@ export default function Docentes() {
               Prefiere clases consecutivas entre grupos del mismo grado
               <span className="block text-xs text-slate-500">
                 (misma materia y sección, p. ej. 2A y 2B).
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={form.peParesMismoDia}
+              onChange={(e) => setForm({ ...form, peParesMismoDia: e.target.checked })}
+              className="mt-0.5"
+            />
+            <span className="text-sm leading-snug text-slate-700">
+              Empareja sus grupos de P.E. del mismo grado
+              <span className="block text-xs text-slate-500">
+                Los dos grupos de un grado (p. ej. 7A y 7B) se programan el mismo día.
+                Solo aplica entre grupos de la misma sección que él dicta.
               </span>
             </span>
           </label>

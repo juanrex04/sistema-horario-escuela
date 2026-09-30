@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { config } from "../config.js";
 import { diagnosticarInviabilidad } from "../lib/diagnosticoInviabilidad.js";
 import { generarPdfSeccion, nombreArchivoSeccion } from "../lib/horarioPdf.js";
+import { calcularReglasPE } from "../rules/pe.js";
 
 const router = Router();
 
@@ -14,16 +15,8 @@ function toMinutes(time: string): number {
   return h * 60 + m;
 }
 
-function gradoBase(nombre: string): string {
-  const stripped = nombre.trim();
-  let i = stripped.length;
-  while (i > 0 && /[A-ZÁÉÍÓÚÜÑ]/.test(stripped[i - 1])) i -= 1;
-  if (i === stripped.length || i === 0) return stripped;
-  return stripped.slice(0, i).replace(/\s+$/, "");
-}
-
 async function buildPayload() {
-  const [secciones, dias, bloques, profesores, cursos, materias, cargas, reuniones, deportes, departamentos, materiasMismoBloque, materiasEspacios, espacios, config] =
+  const [secciones, dias, bloques, profesores, cursos, materias, cargas, bloquesFijos, reuniones, deportes, departamentos, materiasMismoBloque, materiasEspacios, espacios, config] =
     await Promise.all([
       prisma.seccion.findMany({ orderBy: { id: "asc" } }),
       prisma.diaSemana.findMany({ orderBy: { numeroDia: "asc" } }),
@@ -35,6 +28,7 @@ async function buildPayload() {
         include: { curso: true, materia: true, profesor: true },
         orderBy: { id: "asc" },
       }),
+      prisma.cargaBloqueFijo.findMany({ orderBy: { id: "asc" } }),
       prisma.reunionSeccion.findMany({ include: { secciones: true } }),
       prisma.deporteSeccion.findMany(),
       prisma.departamento.findMany({
@@ -51,63 +45,67 @@ async function buildPayload() {
     .filter((d) => d.materias.length > 0)
     .map((d) => ({ departamentoId: d.id, materiaIds: d.materias.map((m) => m.id) }));
 
-  const seccionPrimaria = secciones.find((s) => s.nombre === "Primaria");
-  const diasSinPEPorSeccion: { seccionId: number; diaSemanaIds: number[] }[] = [];
-  if (seccionPrimaria) {
-    const diasDeporte = new Set(
-      deportes.filter((d) => d.seccionId === seccionPrimaria.id).map((d) => d.diaSemanaId)
-    );
-    if (diasDeporte.size > 0) {
-      diasSinPEPorSeccion.push({ seccionId: seccionPrimaria.id, diaSemanaIds: [...diasDeporte] });
-    }
-  }
+  const bloquesPayload = bloques.map((b) => ({
+    id: b.id,
+    seccionId: b.seccionId,
+    diaSemanaId: b.diaSemanaId,
+    numeroPeriodo: b.numeroPeriodo,
+    inicioMin: toMinutes(b.horaInicio),
+    finMin: toMinutes(b.horaFin),
+    esAcademico: b.esAcademico,
+  }));
 
-  const esPE = new Map(materias.filter((m) => m.esEducacionFisica).map((m) => [m.id, true]));
-  const paresPEMismoDia: { cargaAId: number; cargaBId: number }[] = [];
-  if (seccionPrimaria) {
-    const porBase = new Map<
-      string,
-      { id: number; cursoId: number; materiaId: number; bloques: number }[]
-    >();
-    for (const c of cargas) {
-      if (!esPE.has(c.materiaId)) continue;
-      const curso = cursos.find((x) => x.id === c.cursoId);
-      if (!curso || curso.seccionId !== seccionPrimaria.id) continue;
-      const base = gradoBase(curso.nombre);
-      const arr = porBase.get(base) ?? [];
-      arr.push({ id: c.id, cursoId: c.cursoId, materiaId: c.materiaId, bloques: c.bloquesSemanalesRequeridos });
-      porBase.set(base, arr);
+  // Reglas de P.E.: la franja de deporte es global entre las tres secciones y el
+  // emparejamiento de pares depende del flag por docente. Ver src/rules/pe.ts.
+  const { paresPEMismoDia, deportesPEAntes, advertencias: advertenciasPE } = calcularReglasPE({
+    secciones,
+    bloques: bloquesPayload,
+    deportes,
+    cursos,
+    materias,
+    cargas,
+    profesores,
+  });
+  for (const a of advertenciasPE) console.warn(`[timetable] ${a}`);
+
+  // Un bloque fijo se paga con la disponibilidad del docente y con el espacio: si
+  // el fijador no lo tiene en cuenta, el solver se contradice a sí mismo y la
+  // generación termina en INFEASIBLE sin explicación.
+  const advertenciasBloqueFijo: string[] = [];
+  if (bloquesFijos.length > 0) {
+    const porCarga = new Map<number, number[]>();
+    for (const f of bloquesFijos) {
+      const arr = porCarga.get(f.cargaAcademicaId) ?? [];
+      arr.push(f.bloqueHorarioId);
+      porCarga.set(f.cargaAcademicaId, arr);
     }
-    for (const [, cargasDelGrado] of porBase) {
-      if (cargasDelGrado.length !== 2) continue;
-      const [a, b] = cargasDelGrado;
-      if (a.bloques !== b.bloques) continue;
-      const par = a.id < b.id ? { cargaAId: a.id, cargaBId: b.id } : { cargaAId: b.id, cargaBId: a.id };
-      if (!paresPEMismoDia.some((p) => p.cargaAId === par.cargaAId && p.cargaBId === par.cargaBId)) {
-        paresPEMismoDia.push(par);
+    const cargaPorId = new Map(cargas.map((c) => [c.id, c]));
+    const bloquePorId = new Map(bloques.map((b) => [b.id, b]));
+    for (const [cargaId, ids] of porCarga) {
+      const carga = cargaPorId.get(cargaId);
+      if (!carga) continue;
+      if (ids.length !== carga.bloquesSemanalesRequeridos) {
+        advertenciasBloqueFijo.push(
+          `La carga ${cargaId} tiene ${ids.length} bloque(s) fijo(s) pero requiere ${carga.bloquesSemanalesRequeridos}.`
+        );
+        continue;
       }
     }
   }
+  for (const a of advertenciasBloqueFijo) console.warn(`[timetable] ${a}`);
 
   return {
     secciones: secciones.map(({ id, nombre }) => ({ id, nombre })),
     dias: dias.map(({ id, numeroDia, esHorarioEspecial }) => ({ id, numeroDia, esHorarioEspecial })),
-    bloques: bloques.map((b) => ({
-      id: b.id,
-      seccionId: b.seccionId,
-      diaSemanaId: b.diaSemanaId,
-      numeroPeriodo: b.numeroPeriodo,
-      inicioMin: toMinutes(b.horaInicio),
-      finMin: toMinutes(b.horaFin),
-      esAcademico: b.esAcademico,
-    })),
-    profesores: profesores.map(({ id, nombre, seccionBaseId, departamentoId, prefiereGruposConsecutivos, esTiempoCompleto, jornadaParcial }) => ({
+    bloques: bloquesPayload,
+    profesores: profesores.map(({ id, nombre, seccionBaseId, departamentoId, prefiereGruposConsecutivos, esTiempoCompleto, peParesMismoDia, jornadaParcial }) => ({
       id,
       nombre,
       seccionBaseId,
       departamentoId,
       prefiereGruposConsecutivos,
       esTiempoCompleto,
+      peParesMismoDia,
       jornada: (jornadaParcial as { diaSemanaId: number; horaFin: string }[] | null ?? []).map((j) => ({
         diaSemanaId: j.diaSemanaId,
         horaFin: toMinutes(j.horaFin),
@@ -121,6 +119,7 @@ async function buildPayload() {
       materiaId,
       profesorId,
       bloquesSemanalesRequeridos,
+      bloquesFijos: bloquesFijos.filter((f) => f.cargaAcademicaId === id).map((f) => f.bloqueHorarioId),
     })),
     reunionesSeccion: reuniones.map((r) => ({
       diaSemanaId: r.diaSemanaId,
@@ -134,8 +133,8 @@ async function buildPayload() {
       numeroPeriodo: d.numeroPeriodo,
     })),
     materiasMismoBloque: materiasMismoBloque.map(({ materiaAId, materiaBId, cursoId }) => ({ materiaAId, materiaBId, cursoId })),
-    diasSinPEPorSeccion,
     paresPEMismoDia,
+    deportesPEAntes,
     espacios: espacios.map(({ id, nombre }) => ({ id, nombre })),
     materiasEspacios: materiasEspacios.map(({ espacioId, materiaId, seccionId }) => ({ espacioId, materiaId, seccionId })),
     colaborativas,

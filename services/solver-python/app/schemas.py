@@ -69,6 +69,8 @@ class Carga(BaseModel):
     materia_id: int = Field(alias="materiaId")
     profesor_id: int = Field(alias="profesorId")
     bloques_semanales_requeridos: int = Field(alias="bloquesSemanalesRequeridos")
+    # Bloques ancla: si viene la lista, la carga solo puede ocupar esos bloques.
+    bloques_fijos: list[int] = Field(default_factory=list, alias="bloquesFijos")
 
     model_config = {"populate_by_name": True}
 
@@ -102,6 +104,20 @@ class MateriaMismoBloque(BaseModel):
 class DiasSinPEPorSeccion(BaseModel):
     seccion_id: int = Field(alias="seccionId")
     dia_semana_ids: list[int] = Field(alias="diaSemanaIds")
+
+
+class DeportePEAntes(BaseModel):
+    """Inicio del bloque de deporte de una sección en un día.
+
+    La P.E. de esa sección debe terminar antes de `inicio_min` en ese día.
+    Solo se envía para las secciones donde la regla está vigente.
+    """
+
+    seccion_id: int = Field(alias="seccionId")
+    dia_semana_id: int = Field(alias="diaSemanaId")
+    inicio_min: int = Field(alias="inicioMin")
+
+    model_config = {"populate_by_name": True}
 
 
 class ParPEMismoDia(BaseModel):
@@ -143,6 +159,9 @@ class SolveRequest(BaseModel):
     )
     pares_pe_mismo_dia: list[ParPEMismoDia] = Field(
         default_factory=list, alias="paresPEMismoDia"
+    )
+    deportes_pe_antes: list[DeportePEAntes] = Field(
+        default_factory=list, alias="deportesPEAntes"
     )
     espacios: list[Espacio] = Field(default_factory=list)
     materias_espacios: list[MateriaEspacioEntrada] = Field(
