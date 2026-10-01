@@ -22,35 +22,42 @@ export default function CabeceraGrilla({
   return (
     <>
       {(regular.length > 0 || especial.length > 0) && (
-        <tr className="bg-slate-100">
-          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">{labelColumna}</th>
+        <tr className="bg-papel-hondo">
+          <th scope="col" className="grilla-angosta px-4 py-2 text-left text-xs font-medium text-apagado">
+            {labelColumna}
+          </th>
           {regular.length > 0 && (
             <th
+              scope="col"
               colSpan={regular.length}
-              className="px-4 py-2 text-left text-xs font-semibold tracking-wide text-slate-600"
+              className="grilla-angosta px-4 py-2 text-left text-xs font-semibold tracking-tight text-tinta-suave"
             >
-              Horario regular · Lunes a Jueves
+              Horario regular
             </th>
           )}
           {especial.length > 0 && (
             <th
+              scope="col"
               colSpan={especial.length}
-              className="border-l-2 border-dashed border-amber-300 bg-amber-50 px-4 py-2 text-left text-xs font-semibold tracking-wide text-amber-700"
+              className="grilla-angosta border-l-2 border-dashed border-ambar bg-ambar-suave px-4 py-2 text-left text-xs font-semibold tracking-tight text-ambar"
             >
-              Horario especial · Viernes
+              Horario especial
             </th>
           )}
         </tr>
       )}
-      <tr className="bg-slate-50">
-        <th className="px-4 py-3 text-left font-medium text-slate-600">{labelColumna}</th>
+      <tr className="bg-papel">
+        <th scope="col" className="grilla-angosta px-4 py-3 text-left font-medium text-tinta-suave">
+          {labelColumna}
+        </th>
         {columnas.map((c) => (
           <th
             key={c.indice}
-            className={`px-4 py-3 text-left font-medium ${
+            scope="col"
+            className={`grilla-angosta px-4 py-3 text-left font-medium ${
               c.esEspecial
-                ? "border-l-2 border-dashed border-amber-300 bg-amber-50 text-amber-800"
-                : "text-slate-600"
+                ? "border-l-2 border-dashed border-ambar bg-ambar-suave text-ambar"
+                : "text-tinta-suave"
             }`}
           >
             {c.label}

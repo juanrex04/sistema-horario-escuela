@@ -29,15 +29,15 @@ export default function Pagination({ page, pageSize, total, onPage, onPageSize }
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm">
-      <span className="text-slate-500">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-borde px-4 py-3 text-sm">
+      <span className="text-apagado">
         Mostrando {start}–{end} de {total}
       </span>
       <div className="flex items-center gap-2">
         <select
           value={pageSize}
           onChange={(e) => onPageSize(Number(e.target.value))}
-          className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-600 focus:border-indigo-500 focus:outline-none"
+          className="border border-borde-fuerte bg-superficie px-2 py-1.5 text-sm text-tinta-suave focus:border-pizarra"
           aria-label="Filas por página"
         >
           {PAGE_SIZES.map((s) => (
@@ -49,23 +49,26 @@ export default function Pagination({ page, pageSize, total, onPage, onPageSize }
         <button
           onClick={() => onPage(page - 1)}
           disabled={page <= 1}
-          className="flex h-8 items-center gap-1 rounded-lg border border-slate-300 px-2.5 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          aria-label="Página anterior"
+          className="flex h-8 items-center gap-1 border border-borde-fuerte px-2.5 font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           Anterior
         </button>
         <div className="flex items-center gap-1">
           {pages.map((p, i) =>
             p === "…" ? (
-              <span key={`e${i}`} className="px-1 text-slate-400">
+              <span key={`e${i}`} className="px-1 text-tenue" aria-hidden="true">
                 …
               </span>
             ) : (
               <button
                 key={p}
                 onClick={() => onPage(p)}
-                className={`h-8 min-w-8 rounded-lg px-2 text-sm font-medium ${
-                  p === page ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                aria-label={`Página ${p}`}
+                aria-current={p === page ? "page" : undefined}
+                className={`h-8 min-w-8 px-2 text-sm font-medium ${
+                  p === page ? "bg-pizarra text-chalk" : "text-tinta-suave hover:bg-papel-hondo"
                 }`}
               >
                 {p}
@@ -76,10 +79,11 @@ export default function Pagination({ page, pageSize, total, onPage, onPageSize }
         <button
           onClick={() => onPage(page + 1)}
           disabled={page >= totalPages}
-          className="flex h-8 items-center gap-1 rounded-lg border border-slate-300 px-2.5 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          aria-label="Página siguiente"
+          className="flex h-8 items-center gap-1 border border-borde-fuerte px-2.5 font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
           Siguiente
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
     </div>

@@ -76,7 +76,7 @@ test("gradoBase respeta tildes y espacios", () => {
 
 /* --------------------------- Regla A: franja --------------------------- */
 
-test("Regla A: la franja es la de inicio de deporte más temprano entre las 3 secciones", () => {
+test("Regla A: un límite por (sección, día) con el inicio de deporte más temprano de ESE DÍA entre las tres secciones", () => {
   siguienteIdBloque = 1;
   const bloques = [
     ...bloquesDe(1, [2, 4]), // Primaria: deporte 7 y 8
@@ -102,17 +102,42 @@ test("Regla A: la franja es la de inicio de deporte más temprano entre las 3 se
   ];
   const r = calcularReglasPE({ secciones, bloques, deportes, cursos: [], materias: [], cargas: [], profesores: [] });
 
-  // Días 1-4 tienen deporte en alguna de las 3; el límite es el mínimo global (795).
-  assert.equal(r.deportesPEAntes.length, 3);
-  for (const regla of r.deportesPEAntes) {
-    assert.equal(regla.limiteMin, 795);
-    assert.deepEqual(regla.diaSemanaIds, [1, 2, 3, 4]);
-  }
-  assert.deepEqual(
-    r.deportesPEAntes.map((x) => x.seccionId).sort((a, b) => a - b),
-    [1, 2, 3]
-  );
+  // El deporte se cruza entre secciones: el día 1 y el 3 el más temprano es el de
+  // Middle (800, antes que el de Diploma en 805) y el día 2 y el 4 es el de
+  // Primaria (795). Ese límite del día se aplica a la P.E. de las TRES secciones.
+  assert.deepEqual(r.deportesPEAntes, [
+    { seccionId: 1, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 1, diaSemanaId: 2, inicioMin: 795 },
+    { seccionId: 1, diaSemanaId: 3, inicioMin: 800 },
+    { seccionId: 1, diaSemanaId: 4, inicioMin: 795 },
+    { seccionId: 2, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 2, diaSemanaId: 2, inicioMin: 795 },
+    { seccionId: 2, diaSemanaId: 3, inicioMin: 800 },
+    { seccionId: 2, diaSemanaId: 4, inicioMin: 795 },
+    { seccionId: 3, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 3, diaSemanaId: 2, inicioMin: 795 },
+    { seccionId: 3, diaSemanaId: 3, inicioMin: 800 },
+    { seccionId: 3, diaSemanaId: 4, inicioMin: 795 },
+  ]);
   assert.deepEqual(r.advertencias, []);
+});
+
+test("Regla A: el deporte de otra sección restringe igual a la que no tiene deporte ese día", () => {
+  siguienteIdBloque = 1;
+  // El día 1 solo Middle tiene deporte, pero la P.E. de Primaria también queda
+  // atada a esa franja: por eso el límite se toma entre las tres secciones y no
+  // solo de la sección propia.
+  const bloques = [...bloquesDe(1, [2]), ...bloquesDe(2, [1])];
+  const deportes = [
+    { seccionId: 1, diaSemanaId: 2, numeroPeriodo: "7" },
+    { seccionId: 2, diaSemanaId: 1, numeroPeriodo: "7" },
+  ];
+  const r = calcularReglasPE({ secciones, bloques, deportes, cursos: [], materias: [], cargas: [], profesores: [] });
+
+  assert.ok(
+    r.deportesPEAntes.some((x) => x.seccionId === 1 && x.diaSemanaId === 1 && x.inicioMin === 800),
+    "la P.E. de Primaria debe respetar el deporte de Middle el día 1"
+  );
 });
 
 test("Regla A: un día sin deporte en las 3 secciones queda libre", () => {
@@ -124,9 +149,15 @@ test("Regla A: un día sin deporte en las 3 secciones queda libre", () => {
   ];
   const r = calcularReglasPE({ secciones, bloques, deportes, cursos: [], materias: [], cargas: [], profesores: [] });
 
-  // Solo los días 1 y 2 tienen deporte; el 3, 4 y 5 no se restringen.
-  assert.deepEqual(r.deportesPEAntes[0].diaSemanaIds, [1, 2]);
-  assert.equal(r.deportesPEAntes[0].limiteMin, 795);
+  // Solo hay deporte el día 1 (Middle) y el 2 (Primaria); el 3, 4 y 5 no se restringen.
+  assert.deepEqual(r.deportesPEAntes, [
+    { seccionId: 1, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 1, diaSemanaId: 2, inicioMin: 795 },
+    { seccionId: 2, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 2, diaSemanaId: 2, inicioMin: 795 },
+    { seccionId: 3, diaSemanaId: 1, inicioMin: 800 },
+    { seccionId: 3, diaSemanaId: 2, inicioMin: 795 },
+  ]);
 });
 
 test("Regla A: el deporte solo de Preescolar no restringe a nadie", () => {

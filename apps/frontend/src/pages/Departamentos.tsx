@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX, Tag } from "lucide-react";
+import { Pencil, Plus, Trash2, FilterX, Tag } from "lucide-react";
 import { api } from "../lib/api";
 import { qs, usePaginatedQuery } from "../lib/queries";
 import { TextField } from "../components/fields";
@@ -8,6 +8,9 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
+import FilaVacia from "../components/FilaVacia";
+import Button from "../components/Button";
+import Page from "../components/Page";
 import type { Departamento, Materia } from "../lib/types";
 
 export default function Departamentos() {
@@ -110,15 +113,11 @@ export default function Departamentos() {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Departamentos</h1>
-        <p className="text-sm text-slate-500">
-          Agrupan materias. Si activas la reunión colaborativa, el solucionador garantiza un hueco común semanal para sus docentes.
-        </p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <Page
+      titulo="Departamentos"
+      descripcion="Agrupan materias. Si activas la reunión colaborativa, el solucionador garantiza un hueco común semanal para sus docentes."
+    >
+      <div className="flex flex-wrap items-end gap-3 border border-borde bg-superficie p-4">
         <TextField
           label="Buscar por nombre"
           value={fq}
@@ -126,89 +125,118 @@ export default function Departamentos() {
           placeholder="Ciencia, Lenguaje..."
           wrapper="min-w-56 flex-1"
         />
-        <button
+        <button type="button"
           onClick={() => { setFq(""); setPage(1); }}
           disabled={!fq}
-          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <FilterX className="h-4 w-4" />
+          <FilterX className="h-4 w-4" aria-hidden="true" />
           Limpiar
         </button>
-        <button
+        <button type="button"
           onClick={openCreate}
-          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Nuevo departamento
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+      <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
+        <table className="min-w-[640px] divide-y divide-borde text-sm">
+          <thead className="bg-papel">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Departamento</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Reunión colaborativa</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Materias</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Departamento</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Reunión colaborativa</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Materias</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium text-tinta-suave">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-borde">
             {isLoading && <TableSkeleton cols={4} />}
-            {!isLoading && departamentos.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                  <Search className="mx-auto mb-2 h-5 w-5" />
-                  Sin resultados para los filtros aplicados.
-                </td>
-              </tr>
-            )}
+            {!isLoading &&
+              departamentos.length === 0 &&
+              (fq ? (
+                <FilaVacia
+                  colSpan={4}
+                  mensaje="Sin resultados para los filtros aplicados."
+                  accion={
+                    <Button
+                      tamano="sm"
+                      onClick={() => {
+                        setFq("");
+                        setPage(1);
+                      }}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  }
+                />
+              ) : (
+                <FilaVacia
+                  colSpan={4}
+                  mensaje="Todavía no hay departamentos cargados."
+                  accion={
+                    <Button variant="primario" tamano="sm" onClick={openCreate}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nuevo departamento
+                    </Button>
+                  }
+                />
+              ))}
             {departamentos.map((d) => (
               <tr key={d.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">{d.nombre}</td>
+                <td className="px-4 py-3 font-medium text-tinta">{d.nombre}</td>
                 <td className="px-4 py-3">
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={d.reunionActiva}
+                    aria-label={`Reunión colaborativa de ${d.nombre}`}
                     onClick={() => toggle.mutate({ id: d.id, reunionActiva: !d.reunionActiva })}
                     disabled={toggle.isPending}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      d.reunionActiva ? "bg-emerald-500" : "bg-slate-300"
+                      d.reunionActiva ? "bg-verde" : "bg-borde-fuerte"
                     }`}
                   >
                     <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      className={`inline-block h-4 w-4 transform rounded-full bg-superficie transition-transform ${
                         d.reunionActiva ? "translate-x-6" : "translate-x-1"
                       }`}
                     />
                   </button>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  <span className="rounded-full bg-papel-hondo px-2 py-0.5 text-xs font-medium text-tinta-suave">
                     {d._count?.materias ?? 0}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex gap-1">
-                    <button
+                    <button type="button"
                       onClick={() => openMaterias(d)}
                       title="Asignar materias"
-                      className="rounded p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-600"
+                      aria-label={`Asignar materias de ${d.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-papel-hondo hover:text-tinta-suave"
                     >
-                      <Tag className="h-4 w-4" />
+                      <Tag className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => openEdit(d)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label={`Editar ${d.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => {
                         remove.reset();
                         setToDelete(d);
                       }}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Eliminar ${d.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-tiza-suave hover:text-tiza"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -216,6 +244,9 @@ export default function Departamentos() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-xl border border-borde bg-superficie">
         <Pagination
           page={page}
           pageSize={pageSize}
@@ -246,7 +277,7 @@ export default function Departamentos() {
             placeholder="Ciencia"
           />
           {(create.error || update.error) && (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-tiza">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
             </p>
           )}
@@ -258,14 +289,14 @@ export default function Departamentos() {
                 setEditing(null);
                 setNombre("");
               }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={!nombre.trim() || create.isPending || update.isPending}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
             </button>
@@ -279,16 +310,16 @@ export default function Departamentos() {
         onClose={() => setMateriasOpen(null)}
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-apagado">
             Marca las materias que pertenecen al departamento. Los docentes que las dictan deben poder coincidir en la colaborativa.
           </p>
-          <div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+          <div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-borde p-2">
             {materias.map((m) => {
               const checked = materiaIds.includes(m.id);
               return (
                 <label
                   key={m.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50"
+                  className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm hover:bg-papel"
                 >
                   <input
                     type="checkbox"
@@ -299,25 +330,25 @@ export default function Departamentos() {
                       )
                     }
                   />
-                  <span className="text-slate-700">{m.nombre}</span>
+                  <span className="text-tinta-suave">{m.nombre}</span>
                 </label>
               );
             })}
           </div>
           {saveMaterias.error && (
-            <p className="text-sm text-red-600">{saveMaterias.error instanceof Error ? saveMaterias.error.message : "Error"}</p>
+            <p className="text-sm text-tiza">{saveMaterias.error instanceof Error ? saveMaterias.error.message : "Error"}</p>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button
+            <button type="button"
               onClick={() => setMateriasOpen(null)}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
-            <button
+            <button type="button"
               onClick={() => materiasOpen && saveMaterias.mutate({ id: materiasOpen.id, materiaIds })}
               disabled={saveMaterias.isPending}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {saveMaterias.isPending ? "Guardando..." : "Guardar"}
             </button>
@@ -337,6 +368,6 @@ export default function Departamentos() {
         }}
         onConfirm={() => toDelete && remove.mutate(toDelete.id)}
       />
-    </div>
+    </Page>
   );
 }

@@ -35,7 +35,7 @@ export type ProfesorInput = { id: number; peParesMismoDia: boolean };
 
 export type ParePEMismoDia = { cargaAId: number; cargaBId: number };
 
-export type ReglaPEAntes = { seccionId: number; diaSemanaIds: number[]; limiteMin: number };
+export type ReglaPEAntes = { seccionId: number; diaSemanaId: number; inicioMin: number };
 
 export type ResultadoReglasPE = {
   paresPEMismoDia: ParePEMismoDia[];
@@ -58,7 +58,7 @@ export function gradoBase(nombre: string): string {
 
 /**
  * Une intervalos [inicio, fin) y devuelve cuántos tramos quedan. Si un día tiene
- * más de un tramo, los deportes no son contiguos y un único `limiteMin` sobre
+ * más de un tramo, los deportes no son contiguos y un único `inicioMin` sobre
  * excluiría los huecos intermedios, así que hay que avisar.
  */
 function unirIntervalos(intervalos: { inicioMin: number; finMin: number }[]): {
@@ -88,58 +88,50 @@ export function calcularReglasPE(input: {
 }): ResultadoReglasPE {
   const advertencias: string[] = [];
   const seccionesPE = input.secciones.filter((s) => (SECCIONES_PE as readonly string[]).includes(s.nombre));
-  const idsSeccionesPE = new Set(seccionesPE.map((s) => s.id));
 
-  // ---- Regla A: la P.E. de las tres secciones no cae en la franja de deporte de
-  // ninguna de ellas, sin importar el día ni la sección. Se resuelve con la hora de
-  // inicio de deporte más temprana de cada día, en vez de por día de cada sección.
+  // ---- Regla A: la P.E. de Primaria, Middle y Diploma no puede solaparse en
+  // horario con el deporte de NINGUNA de esas tres secciones (Preescolar queda
+  // fuera). Por eso el límite de un día no se toma del deporte de la sección
+  // propia, sino del inicio más temprano entre las tres: así, el deporte de
+  // Middle también protege la P.E. de Primaria aunque ese día Primary no tenga
+  // deporte. El solver recibe un límite por (sección, día) —contrato de
+  // schemas.py,DeportePEAntes—, así que se repite ese mismo límite del día para
+  // cada una de las tres secciones. Los días sin deporte no generan fila y
+  // dejan la P.E. libre.
   const bloquePorClave = new Map(
     input.bloques.map((b) => [`${b.seccionId}_${b.diaSemanaId}_${b.numeroPeriodo}`, b])
   );
+  const idsSeccionesPE = new Set(seccionesPE.map((s) => s.id));
 
-  const inicioPorDia = new Map<number, number>();
+  const bloquesDeportePorDia = new Map<number, BloqueInput[]>();
   for (const d of input.deportes) {
     if (!idsSeccionesPE.has(d.seccionId)) continue;
     const bloque = bloquePorClave.get(`${d.seccionId}_${d.diaSemanaId}_${d.numeroPeriodo}`);
     // reglas.ts ya garantiza que exista un bloque académico para cada deporte.
     if (!bloque) continue;
-    const actual = inicioPorDia.get(d.diaSemanaId);
-    if (actual === undefined || bloque.inicioMin < actual) inicioPorDia.set(d.diaSemanaId, bloque.inicioMin);
+    const arr = bloquesDeportePorDia.get(d.diaSemanaId) ?? [];
+    arr.push(bloque);
+    bloquesDeportePorDia.set(d.diaSemanaId, arr);
   }
 
-  // Aviso si el deporte de un día no es contiguo: con más de un tramo, un único
-  // limiteMin dejaría fuera de la P.E. también los huecos entre deportes.
-  const finPorDia = new Map<number, number>();
-  for (const d of input.deportes) {
-    if (!idsSeccionesPE.has(d.seccionId)) continue;
-    const bloque = bloquePorClave.get(`${d.seccionId}_${d.diaSemanaId}_${d.numeroPeriodo}`);
-    if (!bloque) continue;
-    const inicio = inicioPorDia.get(d.diaSemanaId)!;
-    if (bloque.inicioMin < inicio) continue;
-    const actual = finPorDia.get(d.diaSemanaId);
-    if (actual === undefined || bloque.finMin > actual) finPorDia.set(d.diaSemanaId, bloque.finMin);
-  }
-  for (const [diaSemanaId, inicioMin] of inicioPorDia) {
-    const intervals = input.deportes
-      .filter((d) => idsSeccionesPE.has(d.seccionId) && d.diaSemanaId === diaSemanaId)
-      .map((d) => bloquePorClave.get(`${d.seccionId}_${d.diaSemanaId}_${d.numeroPeriodo}`))
-      .filter((b): b is BloqueInput => b !== undefined)
-      .map((b) => ({ inicioMin: b.inicioMin, finMin: b.finMin }));
-    if (unirIntervalos(intervals).tramos.length > 1) {
+  const deportesPEAntes: ReglaPEAntes[] = [];
+  for (const [diaSemanaId, bloques] of bloquesDeportePorDia) {
+    const inicioMin = Math.min(...bloques.map((b) => b.inicioMin));
+    for (const s of seccionesPE) {
+      deportesPEAntes.push({ seccionId: s.id, diaSemanaId, inicioMin });
+    }
+
+    // Aviso si la franja de deporte del día no es contigua: un único inicioMin
+    // excluiría de la P.E. también los huecos que quedan entre los tramos.
+    const tramos = unirIntervalos(bloques.map((b) => ({ inicioMin: b.inicioMin, finMin: b.finMin })))
+      .tramos;
+    if (tramos.length > 1) {
       advertencias.push(
-        `El deporte del día ${diaSemanaId} no es contiguo (varios tramos separados): la P.E. se excluye desde las ${inicioMin} min y eso también descarta los huecos intermedios.`
+        `El deporte del día ${diaSemanaId} no es contiguo entre las secciones de P.E. (${tramos.length} tramos): la P.E. se excluye desde el minuto ${inicioMin} y eso también descarta los huecos intermedios.`
       );
     }
   }
-
-  const deportesPEAntes: ReglaPEAntes[] =
-    inicioPorDia.size > 0
-      ? seccionesPE.map((s) => ({
-          seccionId: s.id,
-          diaSemanaIds: [...inicioPorDia.keys()].sort((a, b) => a - b),
-          limiteMin: Math.min(...inicioPorDia.values()),
-        }))
-      : [];
+  deportesPEAntes.sort((a, b) => a.seccionId - b.seccionId || a.diaSemanaId - b.diaSemanaId);
 
   // ---- Regla B: pares de grupos del mismo grado que ven P.E. el mismo día. Solo
   // para los docentes con el flag, y solo entre las cargas de ese mismo docente.

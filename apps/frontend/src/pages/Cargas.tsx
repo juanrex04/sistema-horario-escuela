@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Pin, Plus, Search, Trash2, FilterX, X } from "lucide-react";
 import { api } from "../lib/api";
 import { SelectField, TextField } from "../components/fields";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Button from "../components/Button";
+import Page from "../components/Page";
 import type { BloqueHorario, CargaAcademica, Curso, DiaSemana, Materia, Profesor, Seccion } from "../lib/types";
 
 type FormState = {
@@ -18,6 +20,8 @@ type FormState = {
 };
 
 const EMPTY: FormState = { cursoId: "", seccionId: "", cursoIds: [], materiaIds: [], materiaId: "", profesorId: "", bloques: "" };
+
+const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 
 export default function Cargas() {
   const qc = useQueryClient();
@@ -50,6 +54,7 @@ export default function Cargas() {
   const [toDelete, setToDelete] = useState<CargaAcademica | null>(null);
   const [pinCarga, setPinCarga] = useState<CargaAcademica | null>(null);
   const [pinSel, setPinSel] = useState<number[]>([]);
+  const [confirmarQuitarTodos, setConfirmarQuitarTodos] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["cargas"] });
@@ -79,18 +84,50 @@ export default function Cargas() {
     enabled: pinCarga !== null,
   });
 
+  // El diálogo se abre con los bloques ya marcados. La hidratación ocurre cuando
+  // LLEGA el GET de esa carga, no al abrirla: al cambiar `pinCarga` la query de la
+  // carga anterior sigue en caché, así que leer en ese instante daría los bloques
+  // de la carga previa (o ninguno). El ref marca qué carga está ya hidratada para
+  // no volver a sobrescribir lo que el usuario marque a mano después.
+  const pinHidratadoRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pinCarga) {
+      pinHidratadoRef.current = null;
+      return;
+    }
+    if (!fijosActuales || pinHidratadoRef.current === pinCarga.id) return;
+    pinHidratadoRef.current = pinCarga.id;
+    setPinSel(fijosActuales.bloqueHorarioIds);
+  }, [pinCarga, fijosActuales]);
+
   const guardarFijos = useMutation({
     mutationFn: (ids: number[]) => api.put(`/cargas/${pinCarga!.id}/bloques-fijos`, { bloqueHorarioIds: ids }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["carga-bloques-fijos"] });
       setPinCarga(null);
       setPinSel([]);
+      setConfirmarQuitarTodos(false);
     },
   });
 
-  function abrirFijos(c: CargaAcademica) {
-    setPinCarga(c);
+  function cerrarFijos() {
+    setPinCarga(null);
     setPinSel([]);
+    setConfirmarQuitarTodos(false);
+  }
+
+  function guardarFijosAhora() {
+    if (vaABorrarFijos) {
+      setConfirmarQuitarTodos(true);
+      return;
+    }
+    guardarFijos.mutate(pinSel);
+  }
+
+  function abrirFijos(c: CargaAcademica) {
+    // La lista se hidrata sola cuando llegue el GET de esta carga.
+    pinHidratadoRef.current = null;
+    setPinCarga(c);
   }
 
   function toggleFijo(id: number) {
@@ -102,6 +139,9 @@ export default function Cargas() {
     .filter((g) => g.bloques.length > 0);
   const requeridos = pinCarga?.bloquesSemanalesRequeridos ?? 0;
   const pinValido = pinSel.length === 0 || pinSel.length === requeridos;
+  // Vaciar la lista cuando ya hay fijos guardados es destructivo: hay que confirmarlo.
+  const hayFijosGuardados = (fijosActuales?.bloqueHorarioIds.length ?? 0) > 0;
+  const vaABorrarFijos = hayFijosGuardados && pinSel.length === 0;
 
   const createMasivas = useMutation({
     mutationFn: (data: {
@@ -291,15 +331,11 @@ export default function Cargas() {
   const filtersActive = fSeccion || fCurso || fMateria || fProfesor || fMin || fMax || fq;
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Cargas Académicas</h1>
-        <p className="text-sm text-slate-500">
-          Asigna materia + profesor a cada curso con los bloques semanales requeridos.
-        </p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <Page
+      titulo="Cargas Académicas"
+      descripcion="Asigna materia + profesor a cada curso con los bloques semanales requeridos."
+    >
+      <div className="flex flex-wrap items-end gap-3 border border-borde bg-superficie p-4">
         <SelectField
           label="Sección"
           emptyLabel="Todas"
@@ -365,38 +401,38 @@ export default function Cargas() {
           onChange={(e) => { setFq(e.target.value); }}
           wrapper="min-w-56 flex-1"
         />
-        <button
+        <button type="button"
           onClick={clearFilters}
           disabled={!filtersActive}
-          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <FilterX className="h-4 w-4" />
+          <FilterX className="h-4 w-4" aria-hidden="true" />
           Limpiar
         </button>
-        <button
+        <button type="button"
           onClick={openCreate}
-          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Nueva carga
         </button>
       </div>
 
       {bulkAviso && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="flex items-center gap-3 rounded-xl border border-ambar/30 bg-ambar-suave px-4 py-3 text-sm text-ambar">
           <span>{bulkAviso}</span>
-          <button
+          <button type="button"
             onClick={() => setBulkAviso(null)}
-            className="ml-auto rounded px-1.5 text-amber-500 hover:text-amber-700"
+            className="ml-auto rounded px-1.5 text-ambar hover:text-ambar"
             aria-label="Cerrar aviso"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-apagado">
           {isLoading
             ? "Cargando cargas académicas..."
             : `${cargasFiltradas.length} carga(s) · ${nCursos} curso(s) · ${nDocentes} docente(s)`}
@@ -406,89 +442,108 @@ export default function Cargas() {
       {isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-xl border border-slate-200 bg-slate-100" />
+            <div key={i} className="h-28 animate-pulse border border-borde bg-papel-hondo" />
           ))}
         </div>
       ) : gruposPorCurso.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white py-10 text-center text-slate-400">
-          <Search className="mx-auto mb-2 h-5 w-5" />
-          Sin resultados para los filtros aplicados.
+        <div className="border border-borde bg-superficie py-12 text-center">
+          <div className="mx-auto flex max-w-xs flex-col items-center gap-3 text-apagado">
+            <Search className="h-5 w-5" aria-hidden="true" />
+            <p className="text-sm">
+              {filtersActive
+                ? "Sin resultados para los filtros aplicados."
+                : "Todavía no hay cargas académicas registradas."}
+            </p>
+            {filtersActive ? (
+              <Button tamano="sm" onClick={clearFilters}>
+                Limpiar filtros
+              </Button>
+            ) : (
+              <Button variant="primario" tamano="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Nueva carga
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
           {gruposPorCurso.map((g) => (
-            <div key={g.curso.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div key={g.curso.id} className="overflow-x-auto rounded-xl border border-borde bg-superficie">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-borde bg-papel px-4 py-3">
                 <div>
-                  <h3 className="font-semibold text-slate-800">
+                  <h3 className="font-semibold text-tinta">
                     {g.curso.seccion?.nombre} - {g.curso.nombre}
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-apagado">
                     {g.nMaterias} materia(s) · {g.nProfesores} docente(s) · {g.totalBloques} bloques/sem
                   </p>
                 </div>
-                <button
+                <button type="button"
                   onClick={() => openAsignar(g.curso)}
-                  className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+                  className="flex items-center gap-1.5 rounded-lg border border-pizarra/30 bg-superficie px-3 py-1.5 text-xs font-medium text-pizarra hover:bg-pizarra/10"
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                   Asignar
                 </button>
               </div>
-              <table className="min-w-full divide-y divide-slate-100 text-sm">
+              <table className="min-w-[640px] divide-y divide-borde text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                    <th className="px-4 py-2">Materia</th>
-                    <th className="px-4 py-2">Profesor</th>
-                    <th className="px-4 py-2 text-right">Bloques/sem</th>
-                    <th className="px-4 py-2 text-right">Acciones</th>
+                  <tr className="text-left text-xs font-medium text-apagado">
+                    <th scope="col" className="px-4 py-2">Materia</th>
+                    <th scope="col" className="px-4 py-2">Profesor</th>
+                    <th scope="col" className="px-4 py-2 text-right">Bloques/sem</th>
+                    <th scope="col" className="px-4 py-2 text-right">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-borde">
                   {g.cargas
                     .slice()
                     .sort((a, b) => (a.materia?.nombre ?? "").localeCompare(b.materia?.nombre ?? ""))
                     .map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5 text-slate-700">
+                      <tr key={c.id} className="hover:bg-papel">
+                        <td className="px-4 py-2.5 text-tinta-suave">
                           {c.materia?.nombre}
                           {deptoDeMateria(c.materiaId) && (
-                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                            <span className="ml-2 rounded-full bg-papel-hondo px-2 py-0.5 text-[11px] text-apagado">
                               {deptoDeMateria(c.materiaId)}
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-slate-600">
+                        <td className="px-4 py-2.5 text-tinta-suave">
                           {c.profesor?.nombre}
                           {deptoDelProfesor(c.profesorId) && (
-                            <span className="ml-2 inline-block rounded bg-violet-50 px-1.5 py-0.5 text-[11px] text-violet-600">
+                            <span className="ml-2 inline-block rounded bg-papel-hondo px-1.5 py-0.5 text-[11px] text-tinta-suave">
                               {deptoDelProfesor(c.profesorId)}
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-medium text-slate-700">
+                        <td className="px-4 py-2.5 text-right font-medium text-tinta-suave">
                           {c.bloquesSemanalesRequeridos}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <div className="inline-flex gap-1">
-                            <button
+                            <button type="button"
                               onClick={() => abrirFijos(c)}
                               title="Fijar bloques"
-                              className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                              aria-label={`Fijar bloques de ${c.materia?.nombre ?? 'carga'} - ${g.curso.nombre}`}
+                              className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                             >
-                              <Pin className="h-4 w-4" />
+                              <Pin className="h-4 w-4" aria-hidden="true" />
                             </button>
-                            <button
+                            <button type="button"
                               onClick={() => openEdit(c)}
-                              className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                              aria-label={`Editar carga ${c.materia?.nombre ?? ''}`}
+                              className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                             >
-                              <Pencil className="h-4 w-4" />
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
                             </button>
-                            <button
+                            <button type="button"
                               onClick={() => openDelete(c)}
-                              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              aria-label={`Eliminar carga ${c.materia?.nombre ?? ''}`}
+                              className="rounded p-1 text-apagado hover:bg-tiza-suave hover:text-tiza"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
                             </button>
                           </div>
                         </td>
@@ -582,40 +637,40 @@ export default function Cargas() {
                 </SelectField>
               )}
               {form.seccionId && form.profesorId && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-lg border border-borde bg-papel/50 p-3">
                   <div className="mb-1.5 flex items-center justify-between">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <span className="text-xs font-medium text-apagado">
                       3 · Materias * ({form.materiaIds.length} seleccionada{form.materiaIds.length === 1 ? "" : "s"})
                     </span>
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, materiaIds: materiasVisible.map((m) => m.id) })}
-                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        className="rounded border border-borde-fuerte bg-superficie px-2 py-0.5 text-xs font-medium text-tinta-suave hover:bg-papel"
                       >
                         Todas
                       </button>
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, materiaIds: [] })}
-                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        className="rounded border border-borde-fuerte bg-superficie px-2 py-0.5 text-xs font-medium text-tinta-suave hover:bg-papel"
                       >
                         Ninguno
                       </button>
                     </div>
                   </div>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-tinta-suave">
                       <input
                         type="checkbox"
                         checked={mostrarTodasMaterias}
                         onChange={(e) => setMostrarTodasMaterias(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-3.5 w-3.5 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
                       />
                       Mostrar todas las materias
                     </label>
                     {!mostrarTodasMaterias && (
-                      <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                      <span className="rounded-full bg-pizarra/10 px-2 py-0.5 text-[11px] font-medium text-pizarra">
                         {profesorSel?.departamentoId
                           ? `Departamento: ${profesorSel.departamento?.nombre ?? "—"}`
                           : "Materias sin departamento"}
@@ -623,7 +678,7 @@ export default function Cargas() {
                     )}
                   </div>
                   {materiasVisible.length === 0 ? (
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-apagado">
                       {profesorSel?.departamentoId && !mostrarTodasMaterias
                         ? `El departamento ${profesorSel.departamento?.nombre ?? ""} no tiene materias asignadas.`
                         : "No hay materias registradas."}
@@ -637,18 +692,18 @@ export default function Cargas() {
                             key={m.id}
                             className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
                               checked
-                                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                                ? "border-pizarra/40 bg-pizarra/10 text-pizarra"
+                                : "border-borde bg-superficie text-tinta-suave hover:border-borde-fuerte"
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => toggleMateria(m.id)}
-                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              className="h-4 w-4 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
                             />
                             {m.nombre}
-                            {m.departamento && <span className="text-xs text-slate-400">· {m.departamento.nombre}</span>}
+                            {m.departamento && <span className="text-xs text-apagado">· {m.departamento.nombre}</span>}
                           </label>
                         );
                       })}
@@ -657,30 +712,30 @@ export default function Cargas() {
                 </div>
               )}
               {form.seccionId && form.profesorId && form.materiaIds.length > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-lg border border-borde bg-papel/50 p-3">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <span className="text-xs font-medium text-apagado">
                       4 · Cursos * ({form.cursoIds.length} seleccionado{form.cursoIds.length === 1 ? "" : "s"})
                     </span>
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, cursoIds: cursosDeSeccion.map((c) => c.id) })}
-                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        className="rounded border border-borde-fuerte bg-superficie px-2 py-0.5 text-xs font-medium text-tinta-suave hover:bg-papel"
                       >
                         Todos
                       </button>
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, cursoIds: [] })}
-                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        className="rounded border border-borde-fuerte bg-superficie px-2 py-0.5 text-xs font-medium text-tinta-suave hover:bg-papel"
                       >
                         Ninguno
                       </button>
                     </div>
                   </div>
                   {cursosDeSeccion.length === 0 ? (
-                    <p className="text-sm text-slate-400">La sección no tiene cursos.</p>
+                    <p className="text-sm text-apagado">La sección no tiene cursos.</p>
                   ) : (
                     <div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
                       {cursosDeSeccion.map((c) => {
@@ -690,15 +745,15 @@ export default function Cargas() {
                             key={c.id}
                             className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
                               checked
-                                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                                ? "border-pizarra/40 bg-pizarra/10 text-pizarra"
+                                : "border-borde bg-superficie text-tinta-suave hover:border-borde-fuerte"
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => toggleCurso(c.id)}
-                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              className="h-4 w-4 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
                             />
                             {c.seccion?.nombre} - {c.nombre}
                           </label>
@@ -711,7 +766,7 @@ export default function Cargas() {
             </>
           )}
           </div>
-          <div className="sticky bottom-0 -mx-5 -mb-4 mt-4 flex items-end justify-between gap-4 border-t border-slate-200 bg-white px-5 pb-4 pt-3">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-4 flex items-end justify-between gap-4 border-t border-borde bg-superficie px-5 pb-4 pt-3">
             <div className="w-44 shrink-0">
               <TextField
                 label="Bloques semanales requeridos *"
@@ -724,7 +779,7 @@ export default function Cargas() {
             </div>
             <div className="flex flex-col items-end gap-1">
               {(createMasivas.error || update.error) && (
-                <p className="text-right text-sm text-red-600">
+                <p className="text-right text-sm text-tiza">
                   {(createMasivas.error ?? update.error) instanceof Error
                     ? (createMasivas.error ?? update.error)?.message
                     : "Error"}
@@ -738,7 +793,7 @@ export default function Cargas() {
                     setEditing(null);
                     setForm(EMPTY);
                   }}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
                 >
                   Cancelar
                 </button>
@@ -754,7 +809,7 @@ export default function Cargas() {
                     createMasivas.isPending ||
                     update.isPending
                   }
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                  className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
                 >
                   {createMasivas.isPending || update.isPending ? "Guardando..." : "Guardar"}
                 </button>
@@ -770,32 +825,34 @@ export default function Cargas() {
         onClose={() => {
           setPinCarga(null);
           setPinSel([]);
+          setConfirmarQuitarTodos(false);
         }}
         maxWidth="max-w-3xl"
       >
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-tinta-suave">
           {pinCarga?.materia?.nombre} en {pinCarga?.curso?.nombre} · {pinCarga?.profesor?.nombre}
         </p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-apagado">
           Esta carga requiere {requeridos} bloque(s) por semana. Si eliges bloques, la carga solo
-          podrá dictarse en esos horarios; déjalos todos desmarcados para que el solver elija.
+          podrá dictarse en esos horarios; si no eliges ninguno, el solver podrá usar cualquiera.
         </p>
 
         {!fijosActuales && (
-          <p className="mt-3 text-sm text-slate-400">Cargando bloques fijos actuales...</p>
+          <p className="mt-3 text-sm text-apagado">Cargando bloques fijos actuales...</p>
         )}
-        {fijosActuales && fijosActuales.bloqueHorarioIds.length > 0 && (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Hay {fijosActuales.bloqueHorarioIds.length} bloque(s) fijado(s) guardados. Si no
-            seleccionas ninguno al guardar, se eliminan y la carga vuelve a ser libre.
+        {hayFijosGuardados && (
+          <div className="mt-3 rounded-lg border border-ambar/30 bg-ambar-suave px-3 py-2 text-xs text-ambar">
+            Hay {fijosActuales!.bloqueHorarioIds.length} bloque(s) fijado(s) guardados y aparecen
+            seleccionados. Si los desmarcas todos y guardas, se eliminan y la carga vuelve a ser
+            libre: te lo preguntaremos antes de hacerlo.
           </div>
         )}
 
         <div className="mt-4 space-y-4">
           {bloquesPorDia.map(({ dia, bloques }) => (
             <div key={dia.id}>
-              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Día {dia.numeroDia}
+              <h3 className="mb-1.5 text-xs font-semibold text-apagado">
+                {DIAS[dia.numeroDia - 1] ?? `Día ${dia.numeroDia}`}
               </h3>
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                 {bloques
@@ -810,12 +867,12 @@ export default function Cargas() {
                         onClick={() => toggleFijo(b.id)}
                         className={`rounded-lg border px-2 py-1.5 text-left text-xs transition-colors ${
                           marcado
-                            ? "border-indigo-500 bg-indigo-50 text-indigo-800"
-                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            ? "border-pizarra bg-pizarra/10 text-pizarra"
+                            : "border-borde bg-superficie text-tinta-suave hover:bg-papel"
                         }`}
                       >
                         <span className="block font-medium">P{b.numeroPeriodo}</span>
-                        <span className="block text-[11px] text-slate-500">
+                        <span className="block text-[11px] text-apagado">
                           {b.horaInicio}-{b.horaFin}
                         </span>
                       </button>
@@ -825,41 +882,52 @@ export default function Cargas() {
             </div>
           ))}
           {bloquesPorDia.length === 0 && (
-            <p className="text-sm text-slate-400">No hay bloques académicos para esta sección.</p>
+            <p className="text-sm text-apagado">No hay bloques académicos para esta sección.</p>
           )}
         </div>
 
         <div className="mt-4 flex items-center justify-between">
           <span
-            className={`text-xs ${pinSel.length === requeridos ? "text-emerald-600" : "text-slate-500"}`}
+            className={`text-xs ${pinSel.length === requeridos ? "text-verde" : "text-apagado"}`}
           >
             {pinSel.length} de {requeridos} seleccionados
           </span>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => {
-                setPinCarga(null);
-                setPinSel([]);
-              }}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              onClick={cerrarFijos}
+              className="rounded-lg border border-borde px-4 py-2 text-sm text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
             <button
               type="button"
               disabled={!pinValido || guardarFijos.isPending}
-              onClick={() => guardarFijos.mutate(pinSel)}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              onClick={guardarFijosAhora}
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {guardarFijos.isPending ? "Guardando..." : "Guardar"}
             </button>
           </div>
         </div>
         {guardarFijos.isError && (
-          <p className="mt-2 text-sm text-red-600">{guardarFijos.error.message}</p>
+          <p className="mt-2 text-sm text-tiza">{guardarFijos.error.message}</p>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmarQuitarTodos}
+        title="Quitar todos los bloques fijos"
+        message={`Esta carga tiene ${fijosActuales?.bloqueHorarioIds.length ?? 0} bloque(s) fijo(s) guardados. Si continúas se eliminan todos y el solver podrá asignarla donde quiera. ¿Quieres quitarlos?`}
+        confirmLabel="Quitar todos"
+        loading={guardarFijos.isPending}
+        error={guardarFijos.isError ? guardarFijos.error.message : null}
+        onCancel={() => {
+          setConfirmarQuitarTodos(false);
+          guardarFijos.reset();
+        }}
+        onConfirm={() => guardarFijos.mutate([])}
+      />
 
       <ConfirmDialog
         open={toDelete !== null}
@@ -873,6 +941,6 @@ export default function Cargas() {
         }}
         onConfirm={() => toDelete && remove.mutate(toDelete.id)}
       />
-    </div>
+    </Page>
   );
 }

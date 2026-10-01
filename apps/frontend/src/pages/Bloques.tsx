@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX, CalendarClock, Download, FileUp } from "lucide-react";
+import { Pencil, Plus, Trash2, FilterX, CalendarClock, Download, FileUp } from "lucide-react";
 import { api, getToken, API_URL } from "../lib/api";
 import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
@@ -9,6 +9,9 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
 import CabeceraGrilla, { columnasGrilla } from "../components/CabeceraGrilla";
+import FilaVacia from "../components/FilaVacia";
+import Button from "../components/Button";
+import Page from "../components/Page";
 import type { BloqueHorario, DiaSemana, Reglas, Seccion } from "../lib/types";
 
 type FormState = { seccionId: string; dias: number[]; numeroPeriodo: string; horaInicio: string; horaFin: string; esAcademico: boolean };
@@ -340,13 +343,11 @@ export default function Bloques() {
   const filtersActive = fSeccion || fDia || fTipo;
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Configuración de Bloques</h1>
-        <p className="text-sm text-slate-500">Define la estructura horaria (períodos) por sección y día.</p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <Page
+      titulo="Configuración de Bloques"
+      descripcion="Define la estructura horaria (períodos) por sección y día."
+    >
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-borde bg-superficie p-4">
         <SelectField label="Sección" emptyLabel="Todas" value={fSeccion} onChange={(e) => { setFSeccion(e.target.value); setPage(1); }} wrapper="w-44">
           {secciones.map((s) => (
             <option key={s.id} value={s.id}>
@@ -365,62 +366,62 @@ export default function Bloques() {
           <option value="true">Académico</option>
           <option value="false">No académico</option>
         </SelectField>
-        <button
+        <button type="button"
           onClick={clearFilters}
           disabled={!filtersActive}
-          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <FilterX className="h-4 w-4" />
+          <FilterX className="h-4 w-4" aria-hidden="true" />
           Limpiar
         </button>
-        <button
+        <button type="button"
           onClick={openCreate}
-          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Nuevo bloque
         </button>
-        <button
+        <button type="button"
           onClick={() => {
             setImportOpen(true);
             setArchivo(null);
             setImportError(null);
             setImportResult(null);
           }}
-          className="flex h-9 items-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          className="flex h-9 items-center gap-2 rounded-lg border border-pizarra/40 bg-pizarra/10 px-3 text-sm font-medium text-pizarra hover:bg-pizarra/15"
         >
-          <FileUp className="h-4 w-4" />
+          <FileUp className="h-4 w-4" aria-hidden="true" />
           Cargar desde Excel
         </button>
       </div>
 
       {fSeccion ? (
-        <section className="rounded-xl border border-slate-200 bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-            <h2 className="text-base font-semibold text-slate-800">Distribución de bloques</h2>
-            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+        <section className="rounded-xl border border-borde bg-superficie">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-borde px-4 py-3">
+            <h2 className="text-base font-semibold text-tinta">Distribución de bloques</h2>
+            <span className="rounded-full bg-pizarra/10 px-3 py-1 text-xs font-medium text-pizarra">
               Sección: {seccionActual?.nombre}
             </span>
           </div>
           {resumenFranjas && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-borde bg-papel/60 px-4 py-3 text-sm text-tinta-suave">
               {resumenFranjas.regular && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" />
-                  <span className="font-medium text-slate-800">Lun–Jue:</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-pizarra/60" />
+                  <span className="font-medium text-tinta">Lun–Jue:</span>
                   {resumenFranjas.regular.n} períodos ({resumenFranjas.regular.inicio}–{resumenFranjas.regular.fin})
                 </span>
               )}
               {resumenFranjas.viernes && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />
-                  <span className="font-medium text-slate-800">Viernes (especial):</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-ambar" />
+                  <span className="font-medium text-tinta">Viernes (especial):</span>
                   {resumenFranjas.viernes.n} períodos ({resumenFranjas.viernes.inicio}–{resumenFranjas.viernes.fin})
                 </span>
               )}
               <span className="inline-flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-sm bg-slate-400" />
-                <span className="font-medium text-slate-800">Reservados:</span>
+                <span className="h-2.5 w-2.5 rounded-sm bg-tenue" />
+                <span className="font-medium text-tinta">Reservados:</span>
                 {resumenFranjas.reservados} bloques (deportes y reunión de sección)
               </span>
             </div>
@@ -441,13 +442,13 @@ export default function Bloques() {
                         .filter((b) => (diasIdToNum.get(b.diaSemanaId) ?? b.diaSemanaId) === nd)
                         .sort((a, b) => toMinutes(a.horaInicio) - toMinutes(b.horaInicio));
                       return (
-                        <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                        <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-ambar" : ""}`}>
                           <div className="space-y-1.5">
-                            {bloquesDia.length === 0 && <span className="text-xs text-slate-300">—</span>}
+                            {bloquesDia.length === 0 && <span className="text-xs text-tenue">—</span>}
                             {bloquesDia.map((b) => (
-                              <div key={b.id} className={`rounded-lg px-3 py-2 ${b.esAcademico ? "bg-indigo-50" : "bg-amber-50"}`}>
-                                <p className={`font-semibold ${b.esAcademico ? "text-indigo-800" : "text-amber-700"}`}>{b.numeroPeriodo}</p>
-                                <p className={`text-xs ${b.esAcademico ? "text-indigo-600" : "text-amber-600"}`}>
+                              <div key={b.id} className={`rounded-lg px-3 py-2 ${b.esAcademico ? "bg-pizarra/10" : "bg-ambar-suave"}`}>
+                                <p className={`font-semibold ${b.esAcademico ? "text-pizarra" : "text-ambar"}`}>{b.numeroPeriodo}</p>
+                                <p className={`text-xs ${b.esAcademico ? "text-pizarra" : "text-ambar"}`}>
                                   {b.horaInicio}-{b.horaFin} · {b.esAcademico ? "Académico" : "Recreo"}
                                 </p>
                               </div>
@@ -461,80 +462,97 @@ export default function Bloques() {
               </table>
             </div>
           ) : (
-            <p className="px-4 py-8 text-center text-sm text-slate-400">
+            <p className="px-4 py-8 text-center text-sm text-apagado">
               Esta sección aún no tiene bloques definidos.
             </p>
           )}
         </section>
       ) : (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-4 py-12 text-center">
-          <CalendarClock className="mb-3 h-10 w-10 text-slate-300" />
-          <p className="text-sm font-medium text-slate-600">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-borde-fuerte bg-superficie px-4 py-12 text-center">
+          <CalendarClock className="mb-3 h-10 w-10 text-tenue" />
+          <p className="text-sm font-medium text-tinta-suave">
             Hasta que no selecciones una sección no se mostrará la distribución de los bloques.
           </p>
-          <p className="mt-1 text-xs text-slate-400">Usa el filtro de sección de arriba para visualizar la grilla.</p>
+          <p className="mt-1 text-xs text-apagado">Usa el filtro de sección de arriba para visualizar la grilla.</p>
         </div>
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-800">Listado y gestión de bloques</h2>
+        <h2 className="text-base font-semibold text-tinta">Listado y gestión de bloques</h2>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+      <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
+<table className="min-w-[900px] divide-y divide-borde text-sm">
+              <thead className="bg-papel">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Sección</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Día</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Período</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Inicio</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Fin</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Tipo</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Usado</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Sección</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Día</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Período</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Inicio</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Fin</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Tipo</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Usado</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium text-tinta-suave">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-borde">
             {isLoadingTabla && <TableSkeleton cols={8} />}
-            {!isLoadingTabla && bloquesList.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
-                  <Search className="mx-auto mb-2 h-5 w-5" />
-                  Sin resultados para los filtros aplicados.
-                </td>
-              </tr>
-            )}
+            {!isLoadingTabla && bloquesList.length === 0 &&
+              (filtersActive ? (
+                <FilaVacia
+                  colSpan={8}
+                  mensaje="Sin resultados para los filtros aplicados."
+                  accion={
+                    <Button tamano="sm" onClick={clearFilters}>
+                      Limpiar filtros
+                    </Button>
+                  }
+                />
+              ) : (
+                <FilaVacia
+                  colSpan={8}
+                  mensaje="Todavía no hay bloques cargados."
+                  accion={
+                    <Button variant="primario" tamano="sm" onClick={openCreate}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nuevo bloque
+                    </Button>
+                  }
+                />
+              ))}
             {bloquesList.map((b) => (
               <tr key={b.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">{b.seccion?.nombre}</td>
-                <td className="px-4 py-3 text-slate-600">Día {b.diaSemana?.numeroDia}</td>
-                <td className="px-4 py-3 text-slate-600">{b.numeroPeriodo}</td>
-                <td className="px-4 py-3 text-slate-600">{b.horaInicio}</td>
-                <td className="px-4 py-3 text-slate-600">{b.horaFin}</td>
+                <td className="px-4 py-3 font-medium text-tinta">{b.seccion?.nombre}</td>
+                <td className="px-4 py-3 text-tinta-suave">Día {b.diaSemana?.numeroDia}</td>
+                <td className="px-4 py-3 text-tinta-suave">{b.numeroPeriodo}</td>
+                <td className="px-4 py-3 text-tinta-suave">{b.horaInicio}</td>
+                <td className="px-4 py-3 text-tinta-suave">{b.horaFin}</td>
                 <td className="px-4 py-3">
                   {b.esAcademico ? (
-                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">Académico</span>
+                    <span className="rounded-full bg-pizarra/10 px-2 py-0.5 text-xs font-medium text-pizarra">Académico</span>
                   ) : (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Recreo</span>
+                    <span className="rounded-full bg-papel-hondo px-2 py-0.5 text-xs font-medium text-apagado">Recreo</span>
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  <span className="rounded-full bg-papel-hondo px-2 py-0.5 text-xs font-medium text-tinta-suave">
                     {b._count?.asignaciones ?? 0}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex gap-1">
-                    <button
+                    <button type="button"
                       onClick={() => openEdit(b)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label={`Editar bloque ${b.numeroPeriodo} de ${b.seccion?.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => openDelete(b)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Eliminar bloque ${b.numeroPeriodo} de ${b.seccion?.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-tiza-suave hover:text-tiza"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -542,6 +560,9 @@ export default function Bloques() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-xl border border-borde bg-superficie">
         <Pagination
           page={page}
           pageSize={pageSize}
@@ -572,19 +593,19 @@ export default function Bloques() {
             ))}
           </SelectField>
           {editing ? (
-            <p className="text-sm text-slate-700">
+            <p className="text-sm text-tinta-suave">
               Día: <span className="font-medium">{nombreDia(editing.diaSemanaId)}</span>
             </p>
           ) : (
             <div>
-              <span className="mb-2 block text-sm font-medium text-slate-700">
+              <span className="mb-2 block text-sm font-medium text-tinta-suave">
                 Días a los que aplica este período *
               </span>
               <div className="flex gap-2 pb-2">
                 <button
                   type="button"
                   onClick={() => setForm((prev) => ({ ...prev, dias: diasLunJue }))}
-                  className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                  className="rounded-full border border-pizarra/40 bg-pizarra/10 px-3 py-0.5 text-xs font-medium text-pizarra hover:bg-pizarra/15"
                 >
                   Lun–Jue
                 </button>
@@ -594,7 +615,7 @@ export default function Bloques() {
                     const v = dias.find((d) => d.numeroDia === 5);
                     if (v) setForm((prev) => ({ ...prev, dias: [v.id] }));
                   }}
-                  className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                  className="rounded-full border border-pizarra/40 bg-pizarra/10 px-3 py-0.5 text-xs font-medium text-pizarra hover:bg-pizarra/15"
                 >
                   Viernes
                 </button>
@@ -604,22 +625,22 @@ export default function Bloques() {
                   <label
                     key={d.id}
                     className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
-                      form.dias.includes(d.id) ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-300 bg-white text-slate-600"
+                      form.dias.includes(d.id) ? "border-pizarra bg-pizarra/10 text-pizarra" : "border-borde-fuerte bg-superficie text-tinta-suave"
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={form.dias.includes(d.id)}
                       onChange={() => toggleDia(d.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      className="h-4 w-4 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
                     />
                     {nombreDia(d.id)}
                   </label>
                 ))}
               </div>
-              {form.dias.length === 0 && <p className="mt-1 text-sm text-red-600">Selecciona al menos un día.</p>}
+              {form.dias.length === 0 && <p className="mt-1 text-sm text-tiza">Selecciona al menos un día.</p>}
               {conflicto.length > 0 && (
-                <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="mt-2 rounded-md bg-ambar-suave px-3 py-2 text-xs text-ambar">
                   Ya existe bloque para esta sección y período en{" "}
                   {conflicto.map((b) => nombreDia(b.diaSemanaId)).join(", ")} (hora actual {conflicto[0].horaInicio}–{conflicto[0].horaFin}).
                   Se sobrescribirá con el nuevo horario en esos días.
@@ -638,18 +659,18 @@ export default function Bloques() {
             <TextField label="Hora inicio *" type="time" required value={form.horaInicio} onChange={(e) => setForm({ ...form, horaInicio: e.target.value })} />
             <TextField label="Hora fin *" type="time" required value={form.horaFin} onChange={(e) => setForm({ ...form, horaFin: e.target.value })} />
           </div>
-          {timeInvalid && <p className="text-sm text-red-600">La hora de fin debe ser posterior a la de inicio.</p>}
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          {timeInvalid && <p className="text-sm text-tiza">La hora de fin debe ser posterior a la de inicio.</p>}
+          <label className="flex items-center gap-2 text-sm text-tinta-suave">
             <input
               type="checkbox"
               checked={form.esAcademico}
               onChange={(e) => setForm({ ...form, esAcademico: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-4 w-4 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
             />
             Período académico (no es recreo)
           </label>
           {(create.error || update.error) && (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-tiza">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
             </p>
           )}
@@ -661,14 +682,14 @@ export default function Bloques() {
                 setEditing(null);
                 setForm(EMPTY);
               }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={!form.seccionId || form.dias.length === 0 || !form.numeroPeriodo.trim() || !form.horaInicio || !form.horaFin || timeInvalid || create.isPending || update.isPending}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
             </button>
@@ -685,7 +706,7 @@ export default function Bloques() {
         }}
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-tinta-suave">
             Descarga la plantilla, llénala con los períodos de cada sección (usa los desplegables de
             Sección, Día y ¿Académico?) y súbela para crear o actualizar los bloques de una sola vez.
           </p>
@@ -694,13 +715,13 @@ export default function Bloques() {
               type="button"
               onClick={descargarPlantilla}
               disabled={plantillaLoading}
-              className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-50"
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4" aria-hidden="true" />
               {plantillaLoading ? "Preparando..." : "Descargar plantilla"}
             </button>
-            <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-600 hover:bg-slate-100">
-              <FileUp className="h-4 w-4" />
+            <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-borde-fuerte bg-papel px-3 text-sm font-medium text-tinta-suave hover:bg-papel-hondo">
+              <FileUp className="h-4 w-4" aria-hidden="true" />
               <span className="max-w-56 truncate">{archivo ? archivo.name : "Seleccionar archivo .xlsx"}</span>
               <input
                 type="file"
@@ -724,36 +745,36 @@ export default function Bloques() {
               type="button"
               onClick={() => procesarArchivo(archivo)}
               disabled={importar.isPending}
-              className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {importar.isPending ? "Procesando..." : "Procesar cargue"}
             </button>
           )}
           {importar.error && !importError && (
-            <p className="text-sm text-red-600">{importar.error instanceof Error ? importar.error.message : "Error al importar"}</p>
+            <p className="text-sm text-tiza">{importar.error instanceof Error ? importar.error.message : "Error al importar"}</p>
           )}
-          {importError && <p className="text-sm text-red-600">{importError}</p>}
+          {importError && <p className="text-sm text-tiza">{importError}</p>}
           {importResult && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-sm text-slate-700">
+            <div className="rounded-lg border border-borde bg-papel p-3">
+              <p className="text-sm text-tinta-suave">
                 Se crearon <span className="font-semibold">{importResult.creados}</span> bloque(s), se
                 actualizaron <span className="font-semibold">{importResult.actualizados}</span> y se
                 reportaron <span className="font-semibold">{importResult.errores.length}</span> error(es).
               </p>
               {importResult.errores.length > 0 && (
-                <div className="mt-3 overflow-x-auto rounded-lg border border-red-200 bg-white">
-                  <table className="min-w-full divide-y divide-slate-100 text-sm">
-                    <thead className="bg-red-50">
+                <div className="mt-3 overflow-x-auto rounded-lg border border-tiza/30 bg-superficie">
+                  <table className="min-w-full divide-y divide-borde text-sm">
+                    <thead className="bg-tiza-suave">
                       <tr>
-                        <th className="px-3 py-2 text-left font-medium text-red-700">Fila</th>
-                        <th className="px-3 py-2 text-left font-medium text-red-700">Motivo</th>
+                        <th className="px-3 py-2 text-left font-medium text-tiza">Fila</th>
+                        <th className="px-3 py-2 text-left font-medium text-tiza">Motivo</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-borde">
                       {importResult.errores.map((e) => (
                         <tr key={e.fila}>
-                          <td className="px-3 py-2 text-slate-600">{e.fila}</td>
-                          <td className="px-3 py-2 text-slate-700">{e.motivo}</td>
+                          <td className="px-3 py-2 text-tinta-suave">{e.fila}</td>
+                          <td className="px-3 py-2 text-tinta-suave">{e.motivo}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -769,7 +790,7 @@ export default function Bloques() {
                 setImportOpen(false);
                 importar.reset();
               }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cerrar
             </button>
@@ -789,6 +810,6 @@ export default function Bloques() {
         }}
         onConfirm={() => toDelete && remove.mutate(toDelete.id)}
       />
-    </div>
+    </Page>
   );
 }

@@ -1,1 +1,85 @@
 @import "tailwindcss";
+@import "@fontsource-variable/archivo/wdth.css";
+
+/*
+ * Sistema visual: "la pared del horario".
+ * Paleta tomada del mobiliario real del colegio (papel, tinta de pizarra, tiza,
+ * ámbar de aviso), no de una librería. El color codifica estado, nunca decora.
+ */
+@theme {
+  /* Tipografía. Una familia con eje de ancho: el corte angosto etiqueta la grilla. */
+  --font-sans: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-grid: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Papel y tinta */
+  --color-papel: #f4f5f3;
+  --color-papel-hondo: #e7eae6;
+  --color-superficie: #ffffff;
+  --color-tinta: #1e2a24;
+  --color-tinta-suave: #38443d;
+  --color-apagado: #64716a;
+  --color-tenue: #97a19b;
+  --color-borde: #d6dbd7;
+  --color-borde-fuerte: #b4bdb7;
+
+  /* Pizarra: la única superficie oscura y estructural (el rail). */
+  --color-pizarra: #23403a;
+  --color-pizarra-hondo: #1a302b;
+  --color-chalk: #edf1ee;
+  --color-chalk-tenue: #a9b7b1;
+
+  /* Semánticos. Tiza es alarma (conflicto, error, destructivo), no marca. */
+  --color-tiza: #b4232a;
+  --color-tiza-hondo: #951c22;
+  --color-tiza-suave: #f7e7e8;
+  --color-ambar: #8a5a12;
+  --color-ambar-suave: #fbf1df;
+  --color-verde: #2f6b4f;
+  --color-verde-suave: #e4efe9;
+
+  /* Radios: dos valores. Controles a 2px; las píldoras usan rounded-full. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-2xl: 2px;
+  --radius-3xl: 2px;
+  --radius-4xl: 2px;
+
+  /* Sombras: la elevación significa "overlay". Nada más se levanta. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 12px 32px -8px rgb(30 42 36 / 0.22);
+  --shadow-2xl: 0 16px 40px -8px rgb(30 42 36 / 0.28);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-papel);
+    color: var(--color-tinta);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Foco visible de base: la tinta estructural, nunca la tiza (esa es alarma).
+     En el rail oscuro cada control lo sobreescribe con focus-visible:outline-chalk. */
+  :focus-visible {
+    outline: 2px solid var(--color-pizarra);
+    outline-offset: 2px;
+  }
+}
+
+/* Corte angosto de la grilla: mismo Archivo, eje de ancho (62–125). */
+@utility grilla-angosta {
+  font-stretch: 82%;
+  font-variant-numeric: tabular-nums;
+}

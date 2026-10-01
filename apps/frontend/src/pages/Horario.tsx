@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, RefreshCw, Trash2 } from "lucide-react";
+import { CalendarDays, Play, RefreshCw, Trash2 } from "lucide-react";
 import { api, ApiError, API_URL, getToken } from "../lib/api";
 import CabeceraGrilla, { columnasGrilla } from "../components/CabeceraGrilla";
+import Page from "../components/Page";
+import Button from "../components/Button";
 import type {
   BloqueHorario,
   CargaAcademica,
@@ -158,6 +160,17 @@ export default function Horario() {
     const m = new Map<number, boolean>();
     for (const d of dias) m.set(d.numeroDia, d.esHorarioEspecial);
     return m;
+  }, [dias]);
+
+  // Los días especiales vienen de la base: el resumen usa sus nombres reales en vez
+  // de asumir que siempre son los mismos.
+  const etiquetaDiasEspeciales = useMemo(() => {
+    const nombres = dias
+      .filter((d) => d.esHorarioEspecial)
+      .map((d) => DIAS[d.numeroDia - 1] ?? `Día ${d.numeroDia}`);
+    if (nombres.length === 0) return "Horario especial";
+    if (nombres.length === 1) return `${nombres[0]} (especial)`;
+    return `${nombres.join(", ")} (especiales)`;
   }, [dias]);
 
   const curso = useMemo(() => cursos.find((c) => c.id === Number(cursoId)), [cursos, cursoId]);
@@ -350,17 +363,15 @@ export default function Horario() {
   }, [pid, resultado, reglas, colaborativas, profSeccionBaseId, profDeptoId, diasById, diasPorNumero]);
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">Horario Generado</h1>
-          <p className="text-sm text-slate-500">
-            {numAsig > 0
-              ? `${numAsig} de ${requeridas} asignaciones en base de datos. Filtra por curso o profesor.`
-              : `Aún no hay horario generado (${requeridas} requeridas).`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <Page
+      titulo="Horario Generado"
+      descripcion={
+        numAsig > 0
+          ? `${numAsig} de ${requeridas} asignaciones en base de datos. Filtra por curso o profesor.`
+          : `Aún no hay horario generado (${requeridas} requeridas).`
+      }
+      acciones={
+        <>
           <select
             value=""
             disabled={numAsig === 0}
@@ -369,7 +380,7 @@ export default function Horario() {
               const sec = secciones.find((s) => s.id === id);
               if (id && sec) void descargarPdf(sec);
             }}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500 disabled:opacity-40"
+            className="rounded-lg border border-borde-fuerte bg-superficie px-3 py-2 text-sm text-tinta-suave outline-none focus:border-pizarra disabled:opacity-40"
             title="Descargar horario en PDF por sección"
           >
             <option value="">PDF por sección...</option>
@@ -379,27 +390,32 @@ export default function Horario() {
               </option>
             ))}
           </select>
-          <button
+          <button type="button"
             onClick={() => clear.mutate()}
             disabled={clear.isPending || numAsig === 0}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            className="flex items-center gap-2 rounded-lg border border-borde-fuerte bg-superficie px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
             {clear.isPending ? "Limpiando..." : "Limpiar"}
           </button>
-          <button
+          <button type="button"
             onClick={() => generate.mutate()}
             disabled={generate.isPending}
-            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
           >
-            {generate.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {generate.isPending ? (
+              <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Play className="h-4 w-4" aria-hidden="true" />
+            )}
             Generar horario
           </button>
-        </div>
-      </header>
+        </>
+      }
+    >
 
       {feedback && (
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+        <div className="rounded-lg border border-pizarra/30 bg-pizarra/10 px-4 py-3 text-sm text-pizarra">
           {feedback}
         </div>
       )}
@@ -407,7 +423,7 @@ export default function Horario() {
       {genError && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          className="rounded-lg border border-tiza/30 bg-tiza-suave px-4 py-3 text-sm text-tiza"
         >
           <p className="font-semibold">{genError.message}</p>
           {genError.causas && genError.causas.length > 0 && (
@@ -418,7 +434,7 @@ export default function Horario() {
             </ul>
           )}
           {genError.sugerencias && genError.sugerencias.length > 0 && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+            <div className="mt-3 rounded-lg border border-ambar/30 bg-ambar-suave px-3 py-2 text-ambar">
               <p className="font-medium">Sugerencias</p>
               <ul className="mt-1 list-disc space-y-1 pl-5">
                 {genError.sugerencias.map((s, i) => (
@@ -431,19 +447,19 @@ export default function Horario() {
       )}
 
       <div className="flex flex-wrap items-center gap-4">
-        <div className="flex rounded-lg border border-slate-200 bg-white p-1 text-sm">
-          <button
+        <div className="flex rounded-lg border border-borde bg-superficie p-1 text-sm">
+          <button type="button"
             onClick={() => setView("curso")}
             className={`rounded-md px-3 py-1.5 font-medium ${
-              view === "curso" ? "bg-indigo-600 text-white" : "text-slate-600"
+              view === "curso" ? "bg-pizarra text-chalk" : "text-tinta-suave"
             }`}
           >
             Por curso
           </button>
-          <button
+          <button type="button"
             onClick={() => setView("profesor")}
             className={`rounded-md px-3 py-1.5 font-medium ${
-              view === "profesor" ? "bg-indigo-600 text-white" : "text-slate-600"
+              view === "profesor" ? "bg-pizarra text-chalk" : "text-tinta-suave"
             }`}
           >
             Por profesor
@@ -453,7 +469,7 @@ export default function Horario() {
           <select
             value={cursoId}
             onChange={(e) => setCursoId(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+            className="rounded-lg border border-borde-fuerte px-3 py-2 text-sm outline-none focus:border-pizarra"
           >
             <option value="">Selecciona un curso...</option>
             {cursos.map((c) => (
@@ -467,7 +483,7 @@ export default function Horario() {
             <select
               value={profesorId}
               onChange={(e) => setProfesorId(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              className="rounded-lg border border-borde-fuerte px-3 py-2 text-sm outline-none focus:border-pizarra"
             >
               <option value="">Selecciona un profesor...</option>
               {profesores.map((p) => (
@@ -479,7 +495,7 @@ export default function Horario() {
             <select
               value={fMateria}
               onChange={(e) => setFMateria(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              className="rounded-lg border border-borde-fuerte px-3 py-2 text-sm outline-none focus:border-pizarra"
             >
               <option value="">Todas las materias</option>
               {materias.map((m) => (
@@ -493,7 +509,7 @@ export default function Horario() {
         <select
           value={fDia}
           onChange={(e) => setFDia(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          className="rounded-lg border border-borde-fuerte px-3 py-2 text-sm outline-none focus:border-pizarra"
         >
           <option value="">Todos los días</option>
           {DIAS.map((d, i) => (
@@ -504,34 +520,58 @@ export default function Horario() {
         </select>
       </div>
 
-      {isLoading && <p className="text-sm text-slate-400">Cargando...</p>}
+      {isLoading && <p className="text-sm text-apagado">Cargando...</p>}
+
+      {!isLoading && view === "curso" && cursoBloques.length === 0 && (
+        <div className="border border-borde bg-superficie py-12 text-center">
+          <div className="mx-auto flex max-w-sm flex-col items-center gap-3 text-apagado">
+            <CalendarDays className="h-5 w-5" aria-hidden="true" />
+            <p className="text-sm">
+              {numAsig === 0
+                ? "Todavía no hay horario generado."
+                : "Selecciona un curso para ver su horario."}
+            </p>
+            {numAsig === 0 && (
+              <Button
+                variant="primario"
+                tamano="sm"
+                onClick={() => generate.mutate()}
+                disabled={generate.isPending}
+              >
+                <Play className="h-4 w-4" aria-hidden="true" />
+                {generate.isPending ? "Generando..." : "Generar horario"}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {view === "curso" && cursoBloques.length > 0 && (
         <div className="space-y-2">
           {resumenCurso && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-borde bg-superficie px-4 py-3 text-sm text-tinta-suave">
               {resumenCurso.regular && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" />
-                  <span className="font-medium text-slate-800">Lun–Jue:</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-pizarra/60" />
+                  <span className="font-medium text-tinta">Lun–Jue:</span>
                   {resumenCurso.regular.n} períodos ({resumenCurso.regular.inicio}–{resumenCurso.regular.fin})
                 </span>
               )}
               {resumenCurso.viernes && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />
-                  <span className="font-medium text-slate-800">Viernes (especial):</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-ambar" />
+                  <span className="font-medium text-tinta">{etiquetaDiasEspeciales}:</span>
                   {resumenCurso.viernes.n} períodos ({resumenCurso.viernes.inicio}–{resumenCurso.viernes.fin})
                 </span>
               )}
               <span className="inline-flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-sm bg-slate-400" />
-                <span className="font-medium text-slate-800">Reservados:</span>
+                <span className="h-2.5 w-2.5 rounded-sm bg-tenue" />
+                <span className="font-medium text-tinta">Reservados:</span>
                 {resumenCurso.reservados} bloques (deportes y reunión de sección)
               </span>
             </div>
           )}
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
             <table className="w-full text-sm">
               <thead>
                 <CabeceraGrilla labelColumna="" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
@@ -546,7 +586,7 @@ export default function Horario() {
                       .filter((b) => numeroDeDiaId(b.diaSemanaId) === nd)
                       .sort((a, b) => toMinutes(a.horaInicio) - toMinutes(b.horaInicio));
                     return (
-                      <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                      <td key={nd} className={`align-top px-3 py-3 ${esEspecialDia ? "border-l-2 border-dashed border-ambar" : ""}`}>
                         <div className="space-y-1.5">
                           {bloquesDia.map((b) => {
                             const cell = cursoClases[`${nd}-${b.numeroPeriodo}`];
@@ -558,25 +598,25 @@ export default function Horario() {
                             );
                             if (cell) {
                               return cell.length > 1 ? (
-                                <div key={b.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                <div key={b.id} className="rounded-lg bg-pizarra/10 px-3 py-2 shadow-sm">
                                   <div className="flex flex-wrap items-center gap-y-0.5">
                                     {cell.map((a, idx) => (
-                                      <span key={a.id} className="whitespace-nowrap font-semibold text-indigo-800">
-                                        {idx > 0 && <span className="mx-1.5 font-normal text-indigo-400">/</span>}
+                                      <span key={a.id} className="whitespace-nowrap font-semibold text-pizarra">
+                                        {idx > 0 && <span className="mx-1.5 font-normal text-tenue">/</span>}
                                         {a.cargaAcademica.materia?.nombre}
                                       </span>
                                     ))}
                                   </div>
-                                  <p className="text-[10px] text-indigo-400">
+                                  <p className="text-[10px] text-tenue">
                                     {cell[0].bloqueHorario.horaInicio}-{cell[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
                               ) : (
-                                <div key={b.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
-                                  <p className="font-semibold text-indigo-800">
+                                <div key={b.id} className="rounded-lg bg-pizarra/10 px-3 py-2 shadow-sm">
+                                  <p className="font-semibold text-pizarra">
                                     {cell[0].cargaAcademica.materia?.nombre}
                                   </p>
-                                  <p className="text-[10px] text-indigo-400">
+                                  <p className="text-[10px] text-tenue">
                                     {cell[0].bloqueHorario.horaInicio}-{cell[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
@@ -584,24 +624,24 @@ export default function Horario() {
                             }
                             if (esDeporte) {
                               return (
-                                <div key={b.id} className="rounded-lg bg-emerald-50 px-3 py-2 shadow-sm">
-                                  <p className="font-semibold text-emerald-800">Día de deportes</p>
-                                  <p className="text-xs text-emerald-600">Bloque reservado</p>
+                                <div key={b.id} className="rounded-lg bg-verde-suave px-3 py-2 shadow-sm">
+                                  <p className="font-semibold text-verde">Día de deportes</p>
+                                  <p className="text-xs text-verde">Bloque reservado</p>
                                 </div>
                               );
                             }
                             if (!b.esAcademico) {
                               return (
-                                <div key={b.id} className="rounded-lg bg-amber-50 px-3 py-2">
-                                  <p className="font-semibold text-amber-700">{b.numeroPeriodo}</p>
-                                  <p className="text-xs text-amber-600">
+                                <div key={b.id} className="rounded-lg bg-ambar-suave px-3 py-2">
+                                  <p className="font-semibold text-ambar">{b.numeroPeriodo}</p>
+                                  <p className="text-xs text-ambar">
                                     {b.horaInicio}-{b.horaFin} · Recreo
                                   </p>
                                 </div>
                               );
                             }
                             return (
-                              <span key={b.id} className="block text-sm text-slate-400">
+                              <span key={b.id} className="block text-sm text-apagado">
                                 Libre {b.horaInicio}-{b.horaFin}
                               </span>
                             );
@@ -620,38 +660,38 @@ export default function Horario() {
       {view === "profesor" && (
         <div className="space-y-2">
           {resumenProfesor && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-borde bg-superficie px-4 py-3 text-sm text-tinta-suave">
               {resumenProfesor.regular && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" />
-                  <span className="font-medium text-slate-800">Lun–Jue:</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-pizarra/60" />
+                  <span className="font-medium text-tinta">Lun–Jue:</span>
                   {resumenProfesor.regular.n} períodos ({resumenProfesor.regular.ini}–{resumenProfesor.regular.fin})
                 </span>
               )}
               {resumenProfesor.viernes && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />
-                  <span className="font-medium text-slate-800">Viernes (especial):</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-ambar" />
+                  <span className="font-medium text-tinta">Viernes (especial):</span>
                   {resumenProfesor.viernes.n} períodos ({resumenProfesor.viernes.ini}–{resumenProfesor.viernes.fin})
                 </span>
               )}
               {resumenProfesor.nReu > 0 && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-purple-300" />
-                  <span className="font-medium text-slate-800">Reuniones de sección:</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-tinta" />
+                  <span className="font-medium text-tinta">Reuniones de sección:</span>
                   {resumenProfesor.nReu}
                 </span>
               )}
               {resumenProfesor.nCol > 0 && (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-300" />
-                  <span className="font-medium text-slate-800">Colaborativas de departamento:</span>
+                  <span className="h-2.5 w-2.5 rounded-sm bg-ambar/40" />
+                  <span className="font-medium text-tinta">Colaborativas de departamento:</span>
                   {resumenProfesor.nCol}
                 </span>
               )}
             </div>
           )}
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
             <table className="w-full text-sm">
               <thead>
                 <CabeceraGrilla labelColumna="" columnas={columnasGrilla(diasPorNumero, visibleDias)} />
@@ -664,10 +704,10 @@ export default function Horario() {
                     const esEspCol = diasPorNumero.get(nd) ?? false;
                     const entries = profPorDia.get(nd) ?? [];
                     return (
-                      <td key={nd} className={`align-top px-3 py-3 ${esEspCol ? "border-l-2 border-dashed border-amber-300" : ""}`}>
+                      <td key={nd} className={`align-top px-3 py-3 ${esEspCol ? "border-l-2 border-dashed border-ambar" : ""}`}>
                         <div className="space-y-1.5">
                           {entries.length === 0 && (
-                            <span className="text-xs text-slate-300">{pid ? "—" : "Selecciona un profesor"}</span>
+                            <span className="text-xs text-tenue">{pid ? "—" : "Selecciona un profesor"}</span>
                           )}
                           {entries.map((e) => {
                             if (e.skip) return null;
@@ -675,19 +715,19 @@ export default function Horario() {
                               return (
                                 <div key={e.bloque.id} className="space-y-1">
                                   {e.reu && (
-                                    <div className="rounded-lg bg-purple-50 px-3 py-2 shadow-sm">
-                                      <p className="font-semibold text-purple-800">
+                                    <div className="rounded-lg bg-tinta px-3 py-2 shadow-sm">
+                                      <p className="font-semibold text-chalk">
                                         Reunión: {e.reu.secciones.map((s) => s.nombre).join(" + ")}
                                       </p>
-                                      <p className="text-xs text-purple-600">{e.reu.horaInicio}–{e.reu.horaFin}</p>
+                                      <p className="text-xs text-chalk/70">{e.reu.horaInicio}–{e.reu.horaFin}</p>
                                     </div>
                                   )}
                                   {e.col && (
-                                    <div className={`rounded-lg bg-amber-50 px-3 py-2 shadow-sm ${e.reu ? "mt-1" : ""}`}>
-                                      <p className="font-semibold text-amber-800">
+                                    <div className={`rounded-lg bg-ambar-suave px-3 py-2 shadow-sm ${e.reu ? "mt-1" : ""}`}>
+                                      <p className="font-semibold text-ambar">
                                         Colaborativa · {e.col.departamento.nombre}
                                       </p>
-                                      <p className="text-xs text-amber-600">{e.col.horaInicio}–{e.col.horaFin}</p>
+                                      <p className="text-xs text-ambar">{e.col.horaInicio}–{e.col.horaFin}</p>
                                     </div>
                                   )}
                                 </div>
@@ -695,29 +735,29 @@ export default function Horario() {
                             }
                             if (e.clases && e.clases.length > 0) {
                               return e.clases.length > 1 ? (
-                                <div key={e.bloque.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
+                                <div key={e.bloque.id} className="rounded-lg bg-pizarra/10 px-3 py-2 shadow-sm">
                                   <div className="flex flex-wrap items-center gap-y-0.5">
                                     {e.clases.map((a, idx) => (
-                                      <span key={a.id} className="whitespace-nowrap font-semibold text-indigo-800">
-                                        {idx > 0 && <span className="mx-1.5 font-normal text-indigo-400">/</span>}
+                                      <span key={a.id} className="whitespace-nowrap font-semibold text-pizarra">
+                                        {idx > 0 && <span className="mx-1.5 font-normal text-tenue">/</span>}
                                         {a.cargaAcademica.materia?.nombre}
                                       </span>
                                     ))}
                                   </div>
-                                  <p className="text-xs text-indigo-600">
+                                  <p className="text-xs text-pizarra">
                                     {e.clases.map((a) => `${a.cargaAcademica.curso.nombre} · ${a.cargaAcademica.curso.seccion?.nombre}`).join(" · ")}
                                   </p>
-                                  <p className="text-[10px] text-indigo-400">
+                                  <p className="text-[10px] text-tenue">
                                     {e.clases[0].bloqueHorario.horaInicio}-{e.clases[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
                               ) : (
-                                <div key={e.bloque.id} className="rounded-lg bg-indigo-50 px-3 py-2 shadow-sm">
-                                  <p className="font-semibold text-indigo-800">{e.clases[0].cargaAcademica.materia?.nombre}</p>
-                                  <p className="text-xs text-indigo-600">
+                                <div key={e.bloque.id} className="rounded-lg bg-pizarra/10 px-3 py-2 shadow-sm">
+                                  <p className="font-semibold text-pizarra">{e.clases[0].cargaAcademica.materia?.nombre}</p>
+                                  <p className="text-xs text-pizarra">
                                     {e.clases[0].cargaAcademica.curso.nombre} · {e.clases[0].cargaAcademica.curso.seccion?.nombre}
                                   </p>
-                                  <p className="text-[10px] text-indigo-400">
+                                  <p className="text-[10px] text-tenue">
                                     {e.clases[0].bloqueHorario.horaInicio}-{e.clases[0].bloqueHorario.horaFin}
                                   </p>
                                 </div>
@@ -725,9 +765,9 @@ export default function Horario() {
                             }
                             if (!e.bloque.esAcademico) {
                               return (
-                                <div key={e.bloque.id} className="rounded-lg bg-amber-50 px-3 py-2">
-                                  <p className="font-semibold text-amber-700">{e.bloque.numeroPeriodo}</p>
-                                  <p className="text-xs text-amber-600">
+                                <div key={e.bloque.id} className="rounded-lg bg-ambar-suave px-3 py-2">
+                                  <p className="font-semibold text-ambar">{e.bloque.numeroPeriodo}</p>
+                                  <p className="text-xs text-ambar">
                                     {e.bloque.horaInicio}-{e.bloque.horaFin} · Recreo
                                   </p>
                                 </div>
@@ -746,21 +786,21 @@ export default function Horario() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600">
-        <span className="font-medium text-slate-800">Leyenda:</span>
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-borde bg-superficie px-5 py-3 text-sm text-tinta-suave">
+        <span className="font-medium text-tinta">Leyenda:</span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-3 w-3 rounded-sm bg-indigo-100" /> Clase asignada
+          <span className="h-3 w-3 rounded-sm bg-pizarra/15" /> Clase asignada
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-3 w-3 rounded-sm bg-emerald-100" /> Día de deportes
+          <span className="h-3 w-3 rounded-sm bg-verde-suave" /> Día de deportes
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-3 w-3 rounded-sm bg-purple-100" /> Reunión de sección
+          <span className="h-3 w-3 rounded-sm bg-tinta" /> Reunión de sección
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-3 w-3 rounded-sm bg-amber-100" /> Colaborativa de departamento
+          <span className="h-3 w-3 rounded-sm bg-ambar-suave" /> Colaborativa de departamento
         </span>
       </div>
-    </div>
+    </Page>
   );
 }

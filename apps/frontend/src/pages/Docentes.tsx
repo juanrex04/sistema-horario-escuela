@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
+import { Pencil, Plus, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
 import { useCatalogQuery, usePaginatedQuery } from "../lib/queries";
 import { SelectField, TextField } from "../components/fields";
@@ -8,6 +8,9 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
+import FilaVacia from "../components/FilaVacia";
+import Button from "../components/Button";
+import Page from "../components/Page";
 import type { Departamento, DiaSemana, Profesor, Seccion } from "../lib/types";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
@@ -145,13 +148,8 @@ export default function Docentes() {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Docentes</h1>
-        <p className="text-sm text-slate-500">Gestión del cuerpo docente y su adscripción.</p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <Page titulo="Docentes" descripcion="Gestión del cuerpo docente y su adscripción.">
+      <div className="flex flex-wrap items-end gap-3 border border-borde bg-superficie p-4">
         <TextField
           label="Buscar por nombre"
           placeholder="María, Juan..."
@@ -195,7 +193,7 @@ export default function Docentes() {
             </option>
           ))}
         </SelectField>
-        <button
+        <button type="button"
           onClick={() => {
             setFq("");
             setFDepto("");
@@ -204,103 +202,135 @@ export default function Docentes() {
             setPage(1);
           }}
           disabled={!fq && !fDepto && !tieneCargas && !fSeccionBase}
-          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <FilterX className="h-4 w-4" />
+          <FilterX className="h-4 w-4" aria-hidden="true" />
           Limpiar
         </button>
-        <button
+        <button type="button"
           onClick={openCreate}
-          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Nuevo docente
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+      <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
+        <table className="min-w-[840px] divide-y divide-borde text-sm">
+          <thead className="bg-papel">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Nombre</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Sección de adscripción</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Jornada</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Departamento</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Nombre</th>
+              <th scope="col" className="px-4 py-3 text-center font-medium text-tinta-suave">Sección base</th>
+              <th scope="col" className="px-4 py-3 text-center font-medium text-tinta-suave">Jornada</th>
+              <th scope="col" className="px-4 py-3 text-center font-medium text-tinta-suave">Depto.</th>
+              <th scope="col" className="px-4 py-3 text-center font-medium text-tinta-suave">Carga</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium text-tinta-suave">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-borde">
             {isLoading && <TableSkeleton cols={6} />}
-            {!isLoading && profesores.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
-                  <Search className="mx-auto mb-2 h-5 w-5" />
-                  Sin resultados para los filtros aplicados.
-                </td>
-              </tr>
-            )}
+            {!isLoading &&
+              profesores.length === 0 &&
+              (fq || fDepto || tieneCargas || fSeccionBase ? (
+                <FilaVacia
+                  colSpan={6}
+                  mensaje="Sin resultados para los filtros aplicados."
+                  accion={
+                    <Button
+                      tamano="sm"
+                      onClick={() => {
+                        setFq("");
+                        setFDepto("");
+                        setTieneCargas("");
+                        setFSeccionBase("");
+                        setPage(1);
+                      }}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  }
+                />
+              ) : (
+                <FilaVacia
+                  colSpan={6}
+                  mensaje="Todavía no hay docentes cargados."
+                  accion={
+                    <Button variant="primario" tamano="sm" onClick={openCreate}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nuevo docente
+                    </Button>
+                  }
+                />
+              ))}
             {profesores.map((p) => (
               <tr key={p.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">
+                <td className="px-4 py-3 font-medium text-tinta">
                   {p.nombre}
                   {p.prefiereGruposConsecutivos && (
                     <span
-                      className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+                      className="ml-2 rounded-full bg-ambar-suave px-2 py-0.5 text-xs font-medium text-ambar"
                       title="Prefiere clases consecutivas entre grupos del mismo grado (misma materia y sección)"
+                      aria-label="Prefiere clases consecutivas entre grupos del mismo grado (misma materia y sección)"
                     >
                       Consecutivos
                     </span>
                   )}
                   {p.peParesMismoDia && (
                     <span
-                      className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                      className="ml-2 rounded-full bg-verde-suave px-2 py-0.5 text-xs font-medium text-verde"
                       title="Empareja sus grupos de P.E. del mismo grado para que se dicten el mismo día"
+                      aria-label="Empareja sus grupos de P.E. del mismo grado para que se dicten el mismo día"
                     >
                       P.E. pareada
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-slate-600">
-                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
+                <td className="px-4 py-3 text-tinta-suave">
+                  <span className="rounded-full bg-pizarra/10 px-2 py-0.5 text-xs font-medium text-pizarra">
                     {p.seccionBase?.nombre ?? "-"}
                   </span>
                 </td>
                 <td className="px-4 py-3">
                   {p.esTiempoCompleto !== false ? (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                    <span className="rounded-full bg-verde-suave px-2 py-0.5 text-xs font-medium text-verde">
                       Tiempo completo
                     </span>
                   ) : (
                     <span
-                      className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700"
+                      className="rounded-full bg-pizarra/10 px-2 py-0.5 text-xs font-medium text-pizarra"
                       title={(p.jornadaParcial ?? [])
                         .map((j) => `${nombreDia(j.diaSemanaId)} hasta ${j.horaFin}`)
                         .join(", ")}
+                      aria-label={`Jornada parcial: ${(p.jornadaParcial ?? [])
+                        .map((j) => `${nombreDia(j.diaSemanaId)} hasta ${j.horaFin}`)
+                        .join(", ")}`}
                     >
                       Parcial · {(p.jornadaParcial ?? []).length} día(s)
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-slate-600">{p.departamento?.nombre ?? "-"}</td>
+                <td className="px-4 py-3 text-tinta-suave">{p.departamento?.nombre ?? "-"}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  <span className="rounded-full bg-papel-hondo px-2 py-0.5 text-xs font-medium text-tinta-suave">
                     {p._count?.cargas ?? 0}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex gap-1">
-                    <button
+                    <button type="button"
                       onClick={() => openEdit(p)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label={`Editar ${p.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => openDelete(p)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Eliminar ${p.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-tiza-suave hover:text-tiza"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -308,6 +338,9 @@ export default function Docentes() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-xl border border-borde bg-superficie">
         <Pagination
           page={page}
           pageSize={pageSize}
@@ -364,39 +397,39 @@ export default function Docentes() {
               </option>
             ))}
           </SelectField>
-          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-borde bg-papel px-3 py-2.5">
             <input
               type="checkbox"
               checked={form.prefiereGruposConsecutivos}
               onChange={(e) => setForm({ ...form, prefiereGruposConsecutivos: e.target.checked })}
               className="mt-0.5"
             />
-            <span className="text-sm leading-snug text-slate-700">
+            <span className="text-sm leading-snug text-tinta-suave">
               Prefiere clases consecutivas entre grupos del mismo grado
-              <span className="block text-xs text-slate-500">
+              <span className="block text-xs text-apagado">
                 (misma materia y sección, p. ej. 2A y 2B).
               </span>
             </span>
           </label>
-          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-borde bg-papel px-3 py-2.5">
             <input
               type="checkbox"
               checked={form.peParesMismoDia}
               onChange={(e) => setForm({ ...form, peParesMismoDia: e.target.checked })}
               className="mt-0.5"
             />
-            <span className="text-sm leading-snug text-slate-700">
+            <span className="text-sm leading-snug text-tinta-suave">
               Empareja sus grupos de P.E. del mismo grado
-              <span className="block text-xs text-slate-500">
+              <span className="block text-xs text-apagado">
                 Los dos grupos de un grado (p. ej. 7A y 7B) se programan el mismo día.
                 Solo aplica entre grupos de la misma sección que él dicta.
               </span>
             </span>
           </label>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="mb-2 text-sm font-medium text-slate-700">Jornada</p>
+          <fieldset className="rounded border border-borde bg-papel p-3">
+            <legend className="px-1 text-sm font-medium text-tinta-suave">Jornada</legend>
             <div className="flex flex-wrap gap-4">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-tinta-suave">
                 <input
                   type="radio"
                   name="jornada"
@@ -405,7 +438,7 @@ export default function Docentes() {
                 />
                 Tiempo completo
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-tinta-suave">
                 <input
                   type="radio"
                   name="jornada"
@@ -416,7 +449,7 @@ export default function Docentes() {
               </label>
             </div>
             {form.esTiempoCompleto ? (
-              <p className="mt-2 text-xs text-slate-500">Lun–Vie · 06:45–16:00</p>
+              <p className="mt-2 text-xs text-apagado">Lun–Vie · 06:45–16:00</p>
             ) : (
               <div className="mt-2 space-y-1.5">
                 {dias.map((d) => {
@@ -425,10 +458,11 @@ export default function Docentes() {
                   return (
                     <div
                       key={d.id}
-                      className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-2 py-1.5"
+                      className="flex items-center gap-3 rounded-lg border border-borde bg-superficie px-2 py-1.5"
                     >
                       <input
                         type="checkbox"
+                        aria-label={`Trabaja el ${DIAS[d.numeroDia - 1] ?? `día ${d.numeroDia}`}`}
                         checked={marcado}
                         onChange={(e) => {
                           const on = e.target.checked;
@@ -440,9 +474,10 @@ export default function Docentes() {
                           }));
                         }}
                       />
-                      <span className="flex-1 text-sm text-slate-700">{DIAS[d.numeroDia - 1] ?? `Día ${d.numeroDia}`}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-tinta-suave">{DIAS[d.numeroDia - 1] ?? `Día ${d.numeroDia}`}</span>
                       <input
                         type="time"
+                        aria-label={`Hora de fin del ${DIAS[d.numeroDia - 1] ?? `día ${d.numeroDia}`}`}
                         value={marcado ? dia.horaFin : ""}
                         disabled={!marcado}
                         onChange={(e) => {
@@ -454,19 +489,19 @@ export default function Docentes() {
                             ),
                           }));
                         }}
-                        className="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700 disabled:opacity-40"
+                        className="w-28 shrink-0 rounded border border-borde-fuerte px-2 py-1 text-sm text-tinta-suave disabled:opacity-40"
                       />
                     </div>
                   );
                 })}
                 {form.jornada.length === 0 && (
-                  <p className="text-xs text-amber-700">Marca al menos un día de trabajo.</p>
+                  <p role="alert" className="text-xs text-ambar">Marca al menos un día de trabajo.</p>
                 )}
               </div>
             )}
-          </div>
+          </fieldset>
           {(create.error || update.error) && (
-            <p className="text-sm text-red-600">
+            <p role="alert" className="text-sm text-tiza">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
             </p>
           )}
@@ -478,7 +513,7 @@ export default function Docentes() {
                 setEditing(null);
                 setForm(EMPTY);
               }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
@@ -491,7 +526,7 @@ export default function Docentes() {
                 create.isPending ||
                 update.isPending
               }
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
             </button>
@@ -511,6 +546,6 @@ export default function Docentes() {
         }}
         onConfirm={() => toDelete && remove.mutate(toDelete.id)}
       />
-    </div>
+    </Page>
   );
 }

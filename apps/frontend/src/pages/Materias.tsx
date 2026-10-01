@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2, FilterX } from "lucide-react";
+import { Pencil, Plus, Trash2, FilterX } from "lucide-react";
 import { api } from "../lib/api";
 import { usePaginatedQuery } from "../lib/queries";
 import { TextField, SelectField } from "../components/fields";
@@ -8,6 +8,9 @@ import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Pagination from "../components/Pagination";
 import TableSkeleton from "../components/TableSkeleton";
+import FilaVacia from "../components/FilaVacia";
+import Button from "../components/Button";
+import Page from "../components/Page";
 import type { Departamento, Materia } from "../lib/types";
 
 export default function Materias() {
@@ -100,13 +103,8 @@ export default function Materias() {
   }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Materias</h1>
-        <p className="text-sm text-slate-500">Asignaturas que se dictan en el colegio.</p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <Page titulo="Materias" descripcion="Asignaturas que se dictan en el colegio.">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-borde bg-superficie p-4">
         <TextField
           label="Buscar por nombre"
           value={fq}
@@ -114,50 +112,72 @@ export default function Materias() {
           placeholder="Matemática, Lengua..."
           wrapper="min-w-56 flex-1"
         />
-        <button
+        <button type="button"
           onClick={() => { setFq(""); setPage(1); }}
           disabled={!fq}
-          className="flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          className="flex h-9 items-center gap-2 rounded-lg border border-borde-fuerte px-3 text-sm font-medium text-tinta-suave hover:bg-papel disabled:opacity-40"
         >
-          <FilterX className="h-4 w-4" />
+          <FilterX className="h-4 w-4" aria-hidden="true" />
           Limpiar
         </button>
-        <button
+        <button type="button"
           onClick={openCreate}
-          className="flex h-9 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-9 items-center gap-2 rounded-lg bg-pizarra px-4 text-sm font-medium text-chalk hover:bg-pizarra-hondo"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Nueva materia
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+      <div className="overflow-x-auto rounded-xl border border-borde bg-superficie">
+        <table className="min-w-[640px] divide-y divide-borde text-sm">
+          <thead className="bg-papel">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Materia</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">Departamento</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">N° cargas</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">Acciones</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Materia</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">Departamento</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium text-tinta-suave">N° cargas</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium text-tinta-suave">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-borde">
             {isLoading && <TableSkeleton cols={4} />}
-            {!isLoading && materias.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                  <Search className="mx-auto mb-2 h-5 w-5" />
-                  Sin resultados para los filtros aplicados.
-                </td>
-              </tr>
-            )}
+            {!isLoading &&
+              materias.length === 0 &&
+              (fq ? (
+                <FilaVacia
+                  colSpan={4}
+                  mensaje="Sin resultados para los filtros aplicados."
+                  accion={
+                    <Button
+                      tamano="sm"
+                      onClick={() => {
+                        setFq("");
+                        setPage(1);
+                      }}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  }
+                />
+              ) : (
+                <FilaVacia
+                  colSpan={4}
+                  mensaje="Todavía no hay materias cargadas."
+                  accion={
+                    <Button variant="primario" tamano="sm" onClick={openCreate}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nueva materia
+                    </Button>
+                  }
+                />
+              ))}
             {materias.map((m) => (
               <tr key={m.id}>
-                <td className="px-4 py-3 font-medium text-slate-800">
+                <td className="px-4 py-3 font-medium text-tinta">
                   <div className="flex items-center gap-2">
                     {m.nombre}
                     {m.esEducacionFisica && (
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      <span className="rounded-full bg-verde-suave px-2 py-0.5 text-xs font-medium text-verde">
                         Educ. física
                       </span>
                     )}
@@ -165,31 +185,33 @@ export default function Materias() {
                 </td>
                 <td className="px-4 py-3">
                   {m.departamento ? (
-                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                    <span className="rounded-full bg-pizarra/10 px-2 py-0.5 text-xs font-medium text-pizarra">
                       {m.departamento.nombre}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-400">Sin departamento</span>
+                    <span className="text-xs text-apagado">Sin departamento</span>
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  <span className="rounded-full bg-papel-hondo px-2 py-0.5 text-xs font-medium text-tinta-suave">
                     {m._count?.cargas ?? 0}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="inline-flex gap-1">
-                    <button
+                    <button type="button"
                       onClick={() => openEdit(m)}
-                      className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label={`Editar ${m.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-pizarra/10 hover:text-pizarra"
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => openDelete(m)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Eliminar ${m.nombre}`}
+                      className="rounded p-1 text-apagado hover:bg-tiza-suave hover:text-tiza"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -197,6 +219,9 @@ export default function Materias() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-xl border border-borde bg-superficie">
         <Pagination
           page={page}
           pageSize={pageSize}
@@ -238,17 +263,17 @@ export default function Materias() {
               </option>
             ))}
           </SelectField>
-          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-borde px-3 py-2.5 text-sm text-tinta-suave hover:bg-papel">
             <input
               type="checkbox"
               checked={esEducacionFisica}
               onChange={(e) => setEsEducacionFisica(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-4 w-4 rounded border-borde-fuerte text-pizarra focus:ring-pizarra"
             />
             Educación física
           </label>
           {(create.error || update.error) && (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-tiza">
               {(create.error ?? update.error) instanceof Error ? (create.error ?? update.error)?.message : "Error"}
             </p>
           )}
@@ -260,14 +285,14 @@ export default function Materias() {
                 setEditing(null);
                 setNombre("");
               }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-borde-fuerte px-4 py-2 text-sm font-medium text-tinta-suave hover:bg-papel"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={!nombre.trim() || create.isPending || update.isPending}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-lg bg-pizarra px-4 py-2 text-sm font-medium text-chalk hover:bg-pizarra-hondo disabled:opacity-50"
             >
               {create.isPending || update.isPending ? "Guardando..." : "Guardar"}
             </button>
@@ -287,6 +312,6 @@ export default function Materias() {
         }}
         onConfirm={() => toDelete && remove.mutate(toDelete.id)}
       />
-    </div>
+    </Page>
   );
 }

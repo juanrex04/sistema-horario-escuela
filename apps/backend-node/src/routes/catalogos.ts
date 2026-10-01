@@ -1098,7 +1098,7 @@ router.put("/cargas/:id/bloques-fijos", async (req, res) => {
 
   const carga = await prisma.cargaAcademica.findUnique({
     where: { id },
-    select: { id: true, bloquesSemanalesRequeridos: true, cursoId: true },
+    select: { id: true, bloquesSemanalesRequeridos: true, curso: { select: { seccionId: true } } },
   });
   if (!carga) throw new HttpError(404, "Carga académica no encontrada.");
 
@@ -1115,7 +1115,7 @@ router.put("/cargas/:id/bloques-fijos", async (req, res) => {
     if (bloques.length !== unicos.length)
       throw new HttpError(400, "Alguno de los bloques indicados no existe.");
     for (const b of bloques) {
-      if (b.seccionId !== carga.cursoId)
+      if (b.seccionId !== carga.curso.seccionId)
         throw new HttpError(
           400,
           `El bloque ${b.numeroPeriodo} pertenece a otra sección y no puede fijarse para esta carga.`
